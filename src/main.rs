@@ -4,10 +4,19 @@ mod lexer;
 mod error;
 
 fn main() {
-    let x = match tokenize("hello world + 1") {
-        Ok(v) => v,
-        Err(error::Error{line: ln, message: msg}) => panic!("{}:{}", ln, msg)
-    };
+    let source_code = "25r100
+        hello world + 1
+        # hola
+        \"Hello, \\\" world!\\\"\"
+        123guten_5_Tag_";
 
-    println!("Hello, world! {}", x[0].0);
+    match tokenize(source_code) {
+        Ok(v) => {
+            println!("Hello, world!");
+            println!("{:?}", v);
+        },
+        Err(error::Error{line: ln, message: msg}) => {
+            panic!("{}:{}", ln, msg);
+        }
+    };
 }

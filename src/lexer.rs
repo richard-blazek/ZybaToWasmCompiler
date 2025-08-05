@@ -1,4 +1,4 @@
-use crate::error::*;
+use crate::error::{err, Fallible};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -142,8 +142,10 @@ pub fn tokenize(input: &str) -> Fallible<Vec<(u32, Token)>> {
         }
     }
 
-    Ok(tokens
-        .into_iter()
-        .filter(|(_, t)| !matches!(t, Token::Empty | Token::Comment))
-        .collect())
+    match tokens.last() {
+        Some((_, Token::Empty | Token::Comment)) => { tokens.pop(); }
+        None | Some(_) => { }
+    }
+
+    Ok(tokens)
 }
