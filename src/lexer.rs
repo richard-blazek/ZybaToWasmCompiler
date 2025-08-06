@@ -1,13 +1,27 @@
 use crate::error::{err, Fallible};
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Literal {
+    Real(f64),
+    Int(u64),
+    Text(String),
+    Bool(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    Literal(u32, Literal),
+    Operator(u32, String),
+    Separator(u32, char),
+    Name(u32, String),
+}
+
+pub enum State {
     Comment,
     Empty,
     LiteralReal(u32, u64, u32),
     LiteralInt(u32, u64),
     LiteralText(String),
-    LiteralBool(bool),
     Operator(String),
     Separator(char),
     Name(String),
@@ -38,100 +52,93 @@ fn is_separator(c: char) -> bool {
     "()[].{}:".contains(c)
 }
 
-fn start_token(line: u32, c: char) -> Fallible<(u32, Token)> {
+fn start_token(line: u32, c: char) -> Fallible<(u32, State)> {
     match c {
-        '"' => Ok((line, Token::LiteralText(String::new()))),
-        '#' => Ok((line, Token::Comment)),
-        c if c.is_digit(10) => Ok((line, Token::LiteralInt(10, parse_digit(c)))),
-        c if is_operator(c) => Ok((line, Token::Operator(c.to_string()))),
-        c if is_separator(c) => Ok((line, Token::Separator(c))),
-        c if is_alpha(c) => Ok((line, Token::Name(c.to_string()))),
-        c if c.is_whitespace() => Ok((line, Token::Empty)),
+        '"' => Ok((line, State::LiteralText(String::new()))),
+        '#' => Ok((line, State::Comment)),
+        c if c.is_digit(10) => Ok((line, State::LiteralInt(10, parse_digit(c)))),
+        c if is_operator(c) => Ok((line, State::Operator(c.to_string()))),
+        c if is_separator(c) => Ok((line, State::Separator(c))),
+        c if is_alpha(c) => Ok((line, State::Name(c.to_string()))),
+        c if c.is_whitespace() => Ok((line, State::Empty)),
         _ => err(line, format!("Invalid character: {}", c)),
     }
 }
 
-fn process_int(newline: u32, line: u32, radix: u32, n: u64, c: char) -> Fallible<Vec<(u32, Token)>> {
+fn process_int(newline: u32, line: u32, radix: u32, n: u64, c: char) -> Fallible<Vec<(u32, State)>> {
     match c {
-        '.' => Ok(vec![(line, Token::LiteralReal(radix, n, 0))]),
-        'b' => {
-            if n == 0 || n == 1 {
-                Ok(vec![(line, Token::LiteralBool(n == 1))])
-            } else {
-                err(line, format!("Invalid bool value {}", n))
-            }
-        }
+        '.' => Ok(vec![(line, State::LiteralReal(radix, n, 0))]),
         'r' => {
             if radix == 10 {
-                Ok(vec![(line, Token::LiteralInt(n as u32, 0))])
+                Ok(vec![(line, State::LiteralInt(n as u32, 0))])
             } else {
                 err(line, "Specifying radix twice".into())
             }
         }
         c if c.is_digit(radix) => {
-            Ok(vec![(line, Token::LiteralInt(radix, n * radix as u64 + parse_digit(c)))])
+            Ok(vec![(line, State::LiteralInt(radix, n * radix as u64 + parse_digit(c)))])
         }
         _ => {
-            Ok(vec![(line, Token::LiteralInt(radix, n)), start_token(newline, c)?])
+            Ok(vec![(line, State::LiteralInt(radix, n)), start_token(newline, c)?])
         }
     }
 }
 
-pub fn tokenize(input: &str) -> Fallible<Vec<(u32, Token)>> {
+fn process_input(input: &str) -> Fallible<Vec<(u32, State)>> {
     let mut tokens = Vec::new();
 
     for c in input.chars() {
         let (line, last_token) = match tokens.pop() {
             Some((line, last_token)) => (line, last_token),
-            None => (0, Token::Empty)
+            None => (0, State::Empty)
         };
         let line_new = if c == '\n' { line + 1 } else { line };
 
         match last_token {
-            Token::Comment => {
-                let tok = if c == '\n' { Token::Empty } else { Token::Comment };
+            State::Comment => {
+                let tok = if c == '\n' { State::Empty } else { State::Comment };
                 tokens.push((line_new, tok));
             }
-            Token::Empty => {
+            State::Empty => {
                 tokens.push(start_token(line_new, c)?);
             },
-            Token::LiteralText(mut s) => {
+            State::LiteralText(mut s) => {
                 if s.ends_with("\\") {
                     s.pop();
                     s.push(c);
-                    tokens.push((line_new, Token::LiteralText(s)));
+                    tokens.push((line_new, State::LiteralText(s)));
                 } else if c == '"' {
-                    tokens.push((line, Token::LiteralText(s)));
-                    tokens.push((line_new, Token::Empty));
+                    tokens.push((line, State::LiteralText(s)));
+                    tokens.push((line_new, State::Empty));
                 } else {
                     s.push(c);
-                    tokens.push((line_new, Token::LiteralText(s)));
+                    tokens.push((line_new, State::LiteralText(s)));
                 }
             },
-            Token::LiteralInt(radix, n) => {
+            State::LiteralInt(radix, n) => {
                 tokens.extend(process_int(line_new, line, radix, n, c)?);
             },
-            Token::LiteralReal(radix, n, exp) => {
+            State::LiteralReal(radix, n, exp) => {
                 if c.is_digit(radix) {
-                    tokens.push((line_new, Token::LiteralReal(radix, n * radix as u64 + parse_digit(c), exp + 1)));
+                    tokens.push((line_new, State::LiteralReal(radix, n * radix as u64 + parse_digit(c), exp + 1)));
                 } else {
-                    tokens.push((line, Token::LiteralReal(radix, n, exp)));
+                    tokens.push((line, State::LiteralReal(radix, n, exp)));
                     tokens.push(start_token(line_new, c)?);
                 }
             },
-            Token::Name(name) => {
+            State::Name(name) => {
                 if is_alnum(c) {
-                    tokens.push((line_new, Token::Name(name + c.to_string().as_str())));
+                    tokens.push((line_new, State::Name(name + c.to_string().as_str())));
                 } else {
-                    tokens.push((line, Token::Name(name)));
+                    tokens.push((line, State::Name(name)));
                     tokens.push(start_token(line_new, c)?);
                 }
             },
-            Token::Operator(op) => {
+            State::Operator(op) => {
                 if is_operator(c) {
-                    tokens.push((line_new, Token::Operator(op + c.to_string().as_str())));
+                    tokens.push((line_new, State::Operator(op + c.to_string().as_str())));
                 } else {
-                    tokens.push((line, Token::Operator(op)));
+                    tokens.push((line, State::Operator(op)));
                     tokens.push(start_token(line_new, c)?);
                 }
             },
@@ -141,11 +148,38 @@ pub fn tokenize(input: &str) -> Fallible<Vec<(u32, Token)>> {
             }
         }
     }
+    Ok(tokens)
+}
 
-    match tokens.last() {
-        Some((_, Token::Empty | Token::Comment)) => { tokens.pop(); }
-        None | Some(_) => { }
-    }
-
+pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
+    let tokens = process_input(input)?.into_iter().flat_map(|(line, state)| {
+        match state {
+            State::Empty | State::Comment => {
+                Vec::new()
+            }
+            State::LiteralReal(radix, val, offset) => {
+                vec![Token::Literal(line, Literal::Real(val as f64 / (radix as f64).powi(offset as i32)))]
+            }
+            State::LiteralInt(_, val) => {
+                vec![Token::Literal(line, Literal::Int(val))]
+            }
+            State::LiteralText(s) => {
+                vec![Token::Literal(line, Literal::Text(s))]
+            }
+            State::Name(name) => {
+                if name == "true" || name == "false" {
+                    vec![Token::Literal(line, Literal::Bool(name == "true"))]
+                } else {
+                    vec![Token::Name(line, name)]
+                }
+            }
+            State::Operator(op) => {
+                vec![Token::Operator(line, op)]
+            }
+            State::Separator(sep) => {
+                vec![Token::Separator(line, sep)]
+            }
+        }
+    }).collect();
     Ok(tokens)
 }

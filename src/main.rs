@@ -12,8 +12,7 @@ fn main() {
 
     match tokenize(source_code) {
         Ok(v) => {
-            println!("Hello, world!");
-            println!("{:?}", v);
+            println!("tokens: {:?}", v);
         },
         Err(error::Error{line: ln, message: msg}) => {
             panic!("{}:{}", ln, msg);
