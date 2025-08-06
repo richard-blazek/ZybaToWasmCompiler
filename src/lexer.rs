@@ -1,5 +1,8 @@
 use crate::error::{err, Fallible};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line(i64);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Real(f64),
@@ -10,10 +13,10 @@ pub enum Literal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Literal(u32, Literal),
-    Operator(u32, String),
-    Separator(u32, char),
-    Name(u32, String),
+    Literal(Line, Literal),
+    Operator(Line, String),
+    Separator(Line, char),
+    Name(Line, String),
 }
 
 pub enum State {
@@ -52,7 +55,7 @@ fn is_separator(c: char) -> bool {
     "()[].{}:".contains(c)
 }
 
-fn start_token(line: u32, c: char) -> Fallible<(u32, State)> {
+fn start_token(line: i64, c: char) -> Fallible<(i64, State)> {
     match c {
         '"' => Ok((line, State::LiteralText(String::new()))),
         '#' => Ok((line, State::Comment)),
@@ -65,7 +68,7 @@ fn start_token(line: u32, c: char) -> Fallible<(u32, State)> {
     }
 }
 
-fn process_int(newline: u32, line: u32, radix: u32, n: u64, c: char) -> Fallible<Vec<(u32, State)>> {
+fn process_int(newline: i64, line: i64, radix: u32, n: u64, c: char) -> Fallible<Vec<(i64, State)>> {
     match c {
         '.' => Ok(vec![(line, State::LiteralReal(radix, n, 0))]),
         'r' => {
@@ -84,7 +87,7 @@ fn process_int(newline: u32, line: u32, radix: u32, n: u64, c: char) -> Fallible
     }
 }
 
-fn process_input(input: &str) -> Fallible<Vec<(u32, State)>> {
+fn process_input(input: &str) -> Fallible<Vec<(i64, State)>> {
     let mut tokens = Vec::new();
 
     for c in input.chars() {
@@ -94,59 +97,56 @@ fn process_input(input: &str) -> Fallible<Vec<(u32, State)>> {
         };
         let line_new = if c == '\n' { line + 1 } else { line };
 
-        match last_token {
+        let new_tokens = match last_token {
             State::Comment => {
-                let tok = if c == '\n' { State::Empty } else { State::Comment };
-                tokens.push((line_new, tok));
+                vec![(line_new, if c == '\n' { State::Empty } else { State::Comment })]
             }
             State::Empty => {
-                tokens.push(start_token(line_new, c)?);
+                vec![start_token(line_new, c)?]
             },
             State::LiteralText(mut s) => {
                 if s.ends_with("\\") {
                     s.pop();
                     s.push(c);
-                    tokens.push((line_new, State::LiteralText(s)));
+                    vec![(line_new, State::LiteralText(s))]
                 } else if c == '"' {
-                    tokens.push((line, State::LiteralText(s)));
-                    tokens.push((line_new, State::Empty));
+                    vec![(line, State::LiteralText(s)), (line_new, State::Empty)]
                 } else {
                     s.push(c);
-                    tokens.push((line_new, State::LiteralText(s)));
+                    vec![(line_new, State::LiteralText(s))]
                 }
             },
             State::LiteralInt(radix, n) => {
-                tokens.extend(process_int(line_new, line, radix, n, c)?);
+                process_int(line_new, line, radix, n, c)?
             },
             State::LiteralReal(radix, n, exp) => {
                 if c.is_digit(radix) {
-                    tokens.push((line_new, State::LiteralReal(radix, n * radix as u64 + parse_digit(c), exp + 1)));
+                    vec![(line_new, State::LiteralReal(radix, n * radix as u64 + parse_digit(c), exp + 1))]
                 } else {
-                    tokens.push((line, State::LiteralReal(radix, n, exp)));
-                    tokens.push(start_token(line_new, c)?);
+                    vec![(line, State::LiteralReal(radix, n, exp)), start_token(line_new, c)?]
                 }
             },
-            State::Name(name) => {
+            State::Name(mut name) => {
                 if is_alnum(c) {
-                    tokens.push((line_new, State::Name(name + c.to_string().as_str())));
+                    name.push(c);
+                    vec![(line_new, State::Name(name))]
                 } else {
-                    tokens.push((line, State::Name(name)));
-                    tokens.push(start_token(line_new, c)?);
+                    vec![(line, State::Name(name)), start_token(line_new, c)?]
                 }
             },
-            State::Operator(op) => {
+            State::Operator(mut op) => {
                 if is_operator(c) {
-                    tokens.push((line_new, State::Operator(op + c.to_string().as_str())));
+                    op.push(c);
+                    vec![(line_new, State::Operator(op))]
                 } else {
-                    tokens.push((line, State::Operator(op)));
-                    tokens.push(start_token(line_new, c)?);
+                    vec![(line, State::Operator(op)), start_token(line_new, c)?]
                 }
             },
             _ => {
-                tokens.push((line, last_token));
-                tokens.push(start_token(line_new, c)?);
+                vec![(line, last_token), start_token(line_new, c)?]
             }
-        }
+        };
+        tokens.extend(new_tokens);
     }
     Ok(tokens)
 }
@@ -158,26 +158,26 @@ pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
                 Vec::new()
             }
             State::LiteralReal(radix, val, offset) => {
-                vec![Token::Literal(line, Literal::Real(val as f64 / (radix as f64).powi(offset as i32)))]
+                vec![Token::Literal(Line(line), Literal::Real(val as f64 / (radix as f64).powi(offset as i32)))]
             }
             State::LiteralInt(_, val) => {
-                vec![Token::Literal(line, Literal::Int(val))]
+                vec![Token::Literal(Line(line), Literal::Int(val))]
             }
             State::LiteralText(s) => {
-                vec![Token::Literal(line, Literal::Text(s))]
+                vec![Token::Literal(Line(line), Literal::Text(s))]
             }
             State::Name(name) => {
                 if name == "true" || name == "false" {
-                    vec![Token::Literal(line, Literal::Bool(name == "true"))]
+                    vec![Token::Literal(Line(line), Literal::Bool(name == "true"))]
                 } else {
-                    vec![Token::Name(line, name)]
+                    vec![Token::Name(Line(line), name)]
                 }
             }
             State::Operator(op) => {
-                vec![Token::Operator(line, op)]
+                vec![Token::Operator(Line(line), op)]
             }
             State::Separator(sep) => {
-                vec![Token::Separator(line, sep)]
+                vec![Token::Separator(Line(line), sep)]
             }
         }
     }).collect();
