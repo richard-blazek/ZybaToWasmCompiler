@@ -11,7 +11,7 @@ pub enum Value {
     Record { line: i64, fields: HashMap<String, Value> },
     Var { line: i64, module: Option<String>, name: String },
     Call { line: i64, func: Box<Value>, args: Vec<Value> },
-    Operation { line: i64, op: String, args: Vec<Value> },
+    BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
     Lambda { line: i64, args: Vec<(String, Value)>, return_type: Box<Value>, body: Vec<Statement> }
 }
@@ -26,7 +26,7 @@ impl Value {
             Value::Record { line, .. } => *line,
             Value::Var { line, .. } => *line,
             Value::Call { line, .. } => *line,
-            Value::Operation { line, .. } => *line,
+            Value::BinOp { line, .. } => *line,
             Value::Access { line, .. } => *line,
             Value::Lambda { line, .. } => *line,
         }
@@ -158,14 +158,80 @@ fn parse_fun(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Value)> 
     Ok((i, Value::Lambda { line, args, return_type: Box::new(ret), body }))
 }
 
+fn parse_access(tokens: &[Token], i: usize, line: i64, object: Value) -> Fallible<(usize, Value)> {
+    if let Token::Name { name, .. } = &tokens[i] {
+        let access = Value::Access {
+            line: line,
+            object: Box::new(object),
+            field: name.clone(),
+        };
+        Ok((i+1, access))
+    } else {
+        err(line, format!("Expected a name after the dot"))?
+    }
+}
+
+fn parse_call(tokens: &[Token], i: usize, line: i64, func: Value) -> Fallible<(usize, Value)> {
+    if let Token::Separator { name: ']', .. } = &tokens[i] {
+        return Ok((i + 1, Value::Call { line: line, func: Box::new(func), args: vec![] }));
+    }
+
+    let mut i = i;
+    let mut args = vec![];
+    loop {
+        let (new_i, value) = parse_value(tokens, i)?;
+        i = new_i;
+        args.push(value);
+
+        match &tokens[i] {
+            Token::Separator { name: ',', .. } => (),
+            Token::Separator { name: ']', .. } => {
+                return Ok((i + 1, Value::Call { line: line, func: Box::new(func), args: args }));
+            }
+            token => err(token.line(), format!("Expected a comma or a parenthesis but got {:?}", token))?
+        }
+    }
+}
+
+fn parse_operand(tokens: &[Token], i: usize) -> Fallible<(usize, Value)> {
+    let (mut i, mut value) = parse_atom(tokens, i)?;
+    loop {
+        match &tokens[i] {
+            Token::Separator { line, name: '.' } => {
+                (i, value) = parse_access(tokens, i + 1, *line, value)?;
+            }
+            Token::Separator { line, name: '[' } => {
+                (i, value) = parse_call(tokens, i + 1, *line, value)?;
+            }
+            _ => return Ok((i, value))
+        }
+    }
+}
+
+fn parse_value(tokens: &[Token], i: usize) -> Fallible<(usize, Value)> {
+    let (mut i, mut value) = parse_operand(tokens, i)?;
+    loop {
+        match &tokens[i] {
+            Token::Operator { line, name } => {
+                let (new_i, rhs) = parse_operand(tokens, i + 1)?;
+                i = new_i;
+                value = Value::BinOp {
+                    line: *line,
+                    name: name.clone(),
+                    lhs: Box::new(value),
+                    rhs: Box::new(rhs),
+                };
+            }
+            _ => return Ok((i, value))
+        }
+    }
+}
+
 fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Statement>)> {
     todo!()
 }
 
-fn parse_value(tokens: &[Token], i: usize) -> Fallible<(usize, Value)> {
-    todo!()
-}
-
 pub fn parse(tokens: &[Token]) -> Fallible<File> {
+    parse_value(tokens, 0)?;
     todo!()
 }

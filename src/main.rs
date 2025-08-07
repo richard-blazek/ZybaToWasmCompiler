@@ -1,7 +1,8 @@
 use crate::lexer::tokenize;
 
-mod lexer;
 mod error;
+mod lexer;
+mod parser;
 
 fn main() {
     let source_code = "25r100
@@ -11,8 +12,9 @@ fn main() {
         123guten_5_Tag_";
 
     match tokenize(source_code) {
-        Ok(v) => {
-            println!("tokens: {:?}", v);
+        Ok(tokens) => {
+            println!("tokens: {:?}", tokens);
+            let x = parser::parse(&tokens);
         },
         Err(error::Error{line: ln, message: msg}) => {
             panic!("{}:{}", ln, msg);
