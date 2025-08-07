@@ -227,6 +227,20 @@ fn parse_value(tokens: &[Token], i: usize) -> Fallible<(usize, Value)> {
     }
 }
 
+fn parse_if(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Statement)> {
+    let (i, cond) = parse_value(tokens, i)?;
+    let (i, then) = parse_block(tokens, i)?;
+    if let Token::Name { name, .. } = &tokens[i] && name == "else" {
+        let (i, otherwise) = parse_block(tokens, i + 1)?;
+        Ok((i, Statement::If { line, cond, then, otherwise }))
+    } else if let Token::Name { name, .. } = &tokens[i] && name == "elif" {
+        let (i, elif) = parse_if(tokens, i + 1, line)?;
+        Ok((i, Statement::If { line, cond, then, otherwise: vec![elif] }))
+    } else {
+        Ok((i, Statement::If { line, cond, then, otherwise: vec![] }))
+    }
+}
+
 fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Statement>)> {
     todo!()
 }
