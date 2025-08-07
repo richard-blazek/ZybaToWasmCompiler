@@ -60,7 +60,7 @@ fn is_operator(c: char) -> bool {
 }
 
 fn is_separator(c: char) -> bool {
-    "()[].{}:".contains(c)
+    "()[].{}:,".contains(c)
 }
 
 fn new_state(line: i64, c: char) -> Fallible<State> {
