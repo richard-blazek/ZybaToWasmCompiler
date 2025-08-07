@@ -12,6 +12,21 @@ pub enum Token {
     Eof { line: i64 },
 }
 
+impl Token {
+    pub fn line(&self) -> i64 {
+        match self {
+            Token::Real { line, .. } => *line,
+            Token::Int { line, .. } => *line,
+            Token::Text { line, .. } => *line,
+            Token::Bool { line, .. } => *line,
+            Token::Operator { line, .. } => *line,
+            Token::Separator { line, .. } => *line,
+            Token::Name { line, .. } => *line,
+            Token::Eof { line } => *line,
+        }
+    }
+}
+
 enum State {
     Initial,
     Comment,
