@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::{err, Fallible};
 use crate::lexer::Token;
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int { line: i64, value: u64 },
     Real { line: i64, value: f64 },
@@ -33,6 +34,7 @@ impl Value {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Value { line: i64, value: Value },
     Assignment { line: i64, name: String, value: Value },
@@ -55,6 +57,7 @@ impl Statement {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Declaration {
     Import { line: i64, path: String },
     Const { line: i64, name: String, value: Value, exported: bool },
@@ -309,7 +312,72 @@ fn parse_statement(tokens: &[Token], i: usize) -> Fallible<(usize, Statement)> {
     }
 }
 
+fn parse_import(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Declaration)> {
+    if let Token::Text { line, value } = &tokens[i] {
+        Ok((i + 1, Declaration::Import { line: *line, path: value.clone() }))
+    } else {
+        err(line, "Expected a string specifying the import path".into())
+    }
+}
+
+fn parse_extern(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Declaration)> {
+    if let Token::Name { name, .. } = &tokens[i] {
+        let i = expect(tokens, i + 1, ':')?;
+        let (i, type_) = parse_value(tokens, i)?;
+        Ok((i, Declaration::Extern { line, name: name.clone(), type_ }))
+    } else {
+        err(line, "Expected a name after 'extern'".into())
+    }
+}
+
+fn parse_const(tokens: &[Token], i: usize, line: i64, name: String, exported: bool) -> Fallible<(usize, Declaration)> {
+    if let Token::Operator { name: op, .. } = &tokens[i] && op == "=" {
+        let (i, value) = parse_value(tokens, i + 1)?;
+        Ok((i, Declaration::Const { line, name, value, exported }))
+    } else {
+        err(line, "Expected '=' in declaration".into())
+    }
+}
+
+fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Declaration)> {
+    match &tokens[i] {
+        Token::Name { line, name } if name == "import" => {
+            parse_import(tokens, i + 1, *line)
+        }
+        Token::Name { line, name } if name == "extern" => {
+            parse_extern(tokens, i + 1, *line)
+        }
+        Token::Name { line, name } if name == "export" => {
+            if let Token::Name { name, .. } = &tokens[i + 1] {
+                parse_const(tokens, i + 2, *line, name.clone(), true)
+            } else {
+                err(*line, "Expected a name after 'export'".into())
+            }
+        }
+        Token::Name { line, name } => {
+            parse_const(tokens, i + 1, *line, name.clone(), false)
+        }
+        token => {
+            err(token.line(), format!("Invalid start of a declaration: {:?}", token))
+        }
+    }
+}
+
+fn is_eof(token: &Token) -> bool {
+    if let Token::Eof { .. } = token {
+        true
+    } else {
+        false
+    }
+}
+
 pub fn parse(tokens: &[Token]) -> Fallible<File> {
-    parse_value(tokens, 0)?;
-    todo!()
+    let mut i = 0;
+    let mut decls = File::new();
+    while !is_eof(&tokens[i]) {
+        let (new_i, decl) = parse_declaration(tokens, i)?;
+        i = new_i;
+        decls.push(decl);
+    }
+    Ok(decls)
 }

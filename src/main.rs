@@ -5,19 +5,24 @@ mod lexer;
 mod parser;
 
 fn main() {
-    let source_code = "25r100
-        hello world + 1
-        # hola
-        \"Hello, \\\" world!\\\"\"
-        123guten_5_Tag_";
+    let source_code = "
+        factorial = fun[n: int] int {
+            result = 1
+            for i : n {
+                result = result * i
+            }
+            result
+        }";
 
-    match tokenize(source_code) {
-        Ok(tokens) => {
-            println!("tokens: {:?}", tokens);
-            let x = parser::parse(&tokens);
-        },
-        Err(error::Error{line: ln, message: msg}) => {
-            panic!("{}:{}", ln, msg);
-        }
+    let tokens = match tokenize(source_code) {
+        Ok(tokens) => tokens,
+        Err(e) => panic!("{:?}", e)
     };
+    let file = match parser::parse(&tokens) {
+        Ok(file) => file,
+        Err(e) => panic!("{:?}", e)
+    };
+
+    println!("tokens: {:?}\n\n", tokens);
+    println!("file: {:?}", file);
 }
