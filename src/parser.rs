@@ -376,7 +376,7 @@ pub fn parse(tokens: &[Token]) -> Fallible<File> {
     let mut decls = File::new();
     while !is_eof(&tokens[i]) {
         let (new_i, decl) = parse_declaration(tokens, i)?;
-        i = new_i;
+        i = expect(tokens, new_i, ';')?;
         decls.push(decl);
     }
     Ok(decls)

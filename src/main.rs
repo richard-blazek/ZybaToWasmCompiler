@@ -6,17 +6,20 @@ mod parser;
 
 fn main() {
     let source_code = "
+    import \"math\";
+    extern alert : Func[void, text];
+
     export factorial = fun[n: int] int {
         result = 1;
         for i : n {
             result = result * i;
         };
         return result;
-    }
+    };
 
     circleArea = fun[radius: real] real {
         return radius * radius * maths.pi;
-    }
+    };
 
     isPrime = fun[n: int] bool {
         prime = true;
@@ -30,15 +33,15 @@ fn main() {
             };
         };
         return prime;
-    }
+    };
 
-    sum = fun[n: int.list] int {
+    export sum = fun[n: int.list] int {
         total = 0;
         for index, value : n {
             total = total + value;
         };
         return total;
-    }
+    };
 
     range = fun[n: int] int.list {
         result = int.list;
@@ -48,7 +51,7 @@ fn main() {
             i = i + 1;
         };
         return result;
-    }
+    };
 
     concat = fun[LoL: int.list.list] int.list {
         result = int.list;
@@ -56,7 +59,7 @@ fn main() {
             result.append[item];
         };
         return result;
-    }
+    };
 
     merge = fun[a: int.list, b: int.list] int.list {
         result = int.list;
@@ -66,7 +69,7 @@ fn main() {
             i = i + 1;
         };
         return result;
-    }";
+    };";
 
     let tokens = match tokenize(source_code) {
         Ok(tokens) => tokens,
