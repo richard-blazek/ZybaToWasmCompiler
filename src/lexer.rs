@@ -106,10 +106,10 @@ fn process_char(c: char, state: State, start_line: i64, current_line: i64) -> Fa
             vec![],
         )),
         State::Initial => Ok((current_line, new_state(start_line, c)?, vec![])),
-        State::Separator(c) => {
+        State::Separator(s) => {
             let token = Token::Separator {
                 line: start_line,
-                name: c,
+                name: s,
             };
             Ok((current_line, new_state(start_line, c)?, vec![token]))
         }

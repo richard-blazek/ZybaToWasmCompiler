@@ -18,11 +18,11 @@ fn main() {
         Ok(tokens) => tokens,
         Err(e) => panic!("{:?}", e)
     };
+    println!("tokens: {:?}\n\n", tokens);
+
     let file = match parser::parse(&tokens) {
         Ok(file) => file,
         Err(e) => panic!("{:?}", e)
     };
-
-    println!("tokens: {:?}\n\n", tokens);
     println!("file: {:?}", file);
 }
