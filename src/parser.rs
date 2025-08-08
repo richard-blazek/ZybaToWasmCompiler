@@ -124,7 +124,7 @@ fn parse_key_value_pairs(tokens: &[Token], i: usize, end: char) -> Fallible<(usi
             pairs.push((name.clone(), value));
 
             match &tokens[i] {
-                Token::Separator { name: ',', .. } => (),
+                Token::Separator { name: ',', .. } => i += 1,
                 Token::Separator { name: c, .. } if *c == end => return Ok((i + 1, pairs)),
                 token => err(token.line(), format!("Expected a comma but got {:?}", token))?
             }
@@ -187,7 +187,7 @@ fn parse_call(tokens: &[Token], i: usize, line: i64, func: Value) -> Fallible<(u
         args.push(value);
 
         match &tokens[i] {
-            Token::Separator { name: ',', .. } => (),
+            Token::Separator { name: ',', .. } => i += 1,
             Token::Separator { name: ']', .. } => {
                 return Ok((i + 1, Value::Call { line: line, func: Box::new(func), args: args }));
             }

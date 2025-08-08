@@ -62,7 +62,7 @@ fn main() {
         result = int.list;
         i = 0;
         while (i < a.count) && (i < b.count) {
-            result.append[a.get[i] b.get[i]];
+            result.append[a.get[i], b.get[i]];
             i = i + 1;
         };
         return result;
@@ -72,11 +72,11 @@ fn main() {
         Ok(tokens) => tokens,
         Err(e) => panic!("{:?}", e)
     };
-    println!("tokens: {:?}\n\n", tokens);
+    println!("{:?}\n\n\n", tokens);
 
     let file = match parser::parse(&tokens) {
         Ok(file) => file,
         Err(e) => panic!("{:?}", e)
     };
-    println!("file: {:?}", file);
+    println!("{:?}\n\n\n", file);
 }
