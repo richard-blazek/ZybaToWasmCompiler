@@ -252,20 +252,20 @@ fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Statement>)> 
         if let Token::Separator { name: '}', .. } = &tokens[i] {
             return Ok((i + 1, stmts))
         }
-        let (new_i, stmt) = parse_statement(tokens, i + 1)?;
+        let (new_i, stmt) = parse_statement(tokens, i)?;
         stmts.push(stmt);
         i = expect(tokens, new_i, ';')?;
     }
 }
 
 fn parse_while(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Statement)> {
-    let (i, cond) = parse_value(tokens, i + 1)?;
+    let (i, cond) = parse_value(tokens, i)?;
     let (i, body) = parse_block(tokens, i)?;
     Ok((i, Statement::While { line, cond, body }))
 }
 
 fn parse_return(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Statement)> {
-    let (i, value) = parse_value(tokens, i + 1)?;
+    let (i, value) = parse_value(tokens, i)?;
     Ok((i, Statement::Return { line, value }))
 }
 
