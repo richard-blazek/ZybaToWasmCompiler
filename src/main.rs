@@ -9,7 +9,7 @@ fn main() {
     import \"math\";
     extern alert : Func[void, text];
 
-    export factorial = fun[n: int] int {
+    factorial = fun[n: int] int {
         result = 1;
         for i : n {
             result = result * i;
@@ -17,7 +17,7 @@ fn main() {
         return result;
     };
 
-    circleArea = fun[radius: real] real {
+    private circleArea = fun[radius: real] real {
         return radius * radius * maths.pi;
     };
 
@@ -35,7 +35,7 @@ fn main() {
         return prime;
     };
 
-    export sum = fun[n: int.list] int {
+    sum = fun[n: int.list] int {
         total = 0;
         for index, value : n {
             total = total + value;
@@ -53,7 +53,7 @@ fn main() {
         return result;
     };
 
-    concat = fun[LoL: int.list.list] int.list {
+    private concat = fun[LoL: int.list.list] int.list {
         result = int.list;
         for item : LoL {
             result.append[item];

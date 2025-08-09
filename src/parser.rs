@@ -60,7 +60,7 @@ impl Statement {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Declaration {
     Import { line: i64, path: String },
-    Const { line: i64, name: String, value: Value, exported: bool },
+    Const { line: i64, name: String, value: Value, private: bool },
     Extern { line: i64, name: String, type_: Value }
 }
 
@@ -330,10 +330,10 @@ fn parse_extern(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Decla
     }
 }
 
-fn parse_const(tokens: &[Token], i: usize, line: i64, name: String, exported: bool) -> Fallible<(usize, Declaration)> {
+fn parse_const(tokens: &[Token], i: usize, line: i64, name: String, private: bool) -> Fallible<(usize, Declaration)> {
     if let Token::Operator { name: op, .. } = &tokens[i] && op == "=" {
         let (i, value) = parse_value(tokens, i + 1)?;
-        Ok((i, Declaration::Const { line, name, value, exported }))
+        Ok((i, Declaration::Const { line, name, value, private }))
     } else {
         err(line, "Expected '=' in declaration".into())
     }
@@ -347,11 +347,11 @@ fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Declaration
         Token::Name { line, name } if name == "extern" => {
             parse_extern(tokens, i + 1, *line)
         }
-        Token::Name { line, name } if name == "export" => {
+        Token::Name { line, name } if name == "private" => {
             if let Token::Name { name, .. } = &tokens[i + 1] {
                 parse_const(tokens, i + 2, *line, name.clone(), true)
             } else {
-                err(*line, "Expected a name after 'export'".into())
+                err(*line, "Expected a name after 'private'".into())
             }
         }
         Token::Name { line, name } => {
