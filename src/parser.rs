@@ -61,7 +61,7 @@ impl Statement {
 pub enum Declaration {
     Import { line: i64, path: String },
     Const { line: i64, name: String, value: Value, private: bool },
-    Extern { line: i64, name: String, type_: Value }
+    Extern { line: i64, name: String, type_: Value, private: bool }
 }
 
 impl Declaration {
@@ -320,11 +320,11 @@ fn parse_import(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Decla
     }
 }
 
-fn parse_extern(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Declaration)> {
+fn parse_extern(tokens: &[Token], i: usize, line: i64, private: bool) -> Fallible<(usize, Declaration)> {
     if let Token::Name { name, .. } = &tokens[i] {
         let i = expect(tokens, i + 1, ':')?;
         let (i, type_) = parse_value(tokens, i)?;
-        Ok((i, Declaration::Extern { line, name: name.clone(), type_ }))
+        Ok((i, Declaration::Extern { line, name: name.clone(), type_, private }))
     } else {
         err(line, "Expected a name after 'extern'".into())
     }
@@ -344,15 +344,19 @@ fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Declaration
         Token::Name { line, name } if name == "import" => {
             parse_import(tokens, i + 1, *line)
         }
-        Token::Name { line, name } if name == "extern" => {
-            parse_extern(tokens, i + 1, *line)
-        }
         Token::Name { line, name } if name == "private" => {
             if let Token::Name { name, .. } = &tokens[i + 1] {
-                parse_const(tokens, i + 2, *line, name.clone(), true)
+                if name == "extern" {
+                    parse_extern(tokens, i + 2, *line, true)
+                } else {
+                    parse_const(tokens, i + 2, *line, name.clone(), true)
+                }
             } else {
                 err(*line, "Expected a name after 'private'".into())
             }
+        }
+        Token::Name { line, name } if name == "extern" => {
+            parse_extern(tokens, i + 1, *line, false)
         }
         Token::Name { line, name } => {
             parse_const(tokens, i + 1, *line, name.clone(), false)

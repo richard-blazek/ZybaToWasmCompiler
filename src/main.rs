@@ -8,6 +8,7 @@ fn main() {
     let source_code = "
     import \"math\";
     extern alert : Func[void, text];
+    private extern isNaN : Func[bool, float];
 
     factorial = fun[n: int] int {
         result = 1;
