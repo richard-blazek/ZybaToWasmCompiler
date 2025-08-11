@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{err, Fallible};
-use crate::lexer::Token;
+use crate::lexer::{Token, tokenize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -58,23 +58,21 @@ impl Statement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Declaration {
+pub enum Decl {
     Import { line: i64, path: String },
     Const { line: i64, name: String, value: Value, private: bool },
     Extern { line: i64, name: String, type_: Value }
 }
 
-impl Declaration {
+impl Decl {
     pub fn line(&self) -> i64 {
         match self {
-            Declaration::Import { line, .. } => *line,
-            Declaration::Const { line, .. } => *line,
-            Declaration::Extern { line, .. } => *line,
+            Decl::Import { line, .. } => *line,
+            Decl::Const { line, .. } => *line,
+            Decl::Extern { line, .. } => *line,
         }
     }
 }
-
-pub type File = Vec<Declaration>;
 
 fn expect(tokens: &[Token], i: usize, sep: char) -> Fallible<usize> {
     if let Token::Separator { name: c, .. } = tokens[i] && c == sep {
@@ -312,34 +310,34 @@ fn parse_statement(tokens: &[Token], i: usize) -> Fallible<(usize, Statement)> {
     }
 }
 
-fn parse_import(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Declaration)> {
+fn parse_import(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Decl)> {
     if let Token::Text { line, value } = &tokens[i] {
-        Ok((i + 1, Declaration::Import { line: *line, path: value.clone() }))
+        Ok((i + 1, Decl::Import { line: *line, path: value.clone() }))
     } else {
         err(line, "Expected a string specifying the import path".into())
     }
 }
 
-fn parse_extern(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Declaration)> {
+fn parse_extern(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Decl)> {
     if let Token::Name { name, .. } = &tokens[i] {
         let i = expect(tokens, i + 1, ':')?;
         let (i, type_) = parse_value(tokens, i)?;
-        Ok((i, Declaration::Extern { line, name: name.clone(), type_ }))
+        Ok((i, Decl::Extern { line, name: name.clone(), type_ }))
     } else {
         err(line, "Expected a name after 'extern'".into())
     }
 }
 
-fn parse_const(tokens: &[Token], i: usize, line: i64, name: String, private: bool) -> Fallible<(usize, Declaration)> {
+fn parse_const(tokens: &[Token], i: usize, line: i64, name: String, private: bool) -> Fallible<(usize, Decl)> {
     if let Token::Operator { name: op, .. } = &tokens[i] && op == "=" {
         let (i, value) = parse_value(tokens, i + 1)?;
-        Ok((i, Declaration::Const { line, name, value, private }))
+        Ok((i, Decl::Const { line, name, value, private }))
     } else {
         err(line, "Expected '=' in declaration".into())
     }
 }
 
-fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Declaration)> {
+fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Decl)> {
     match &tokens[i] {
         Token::Name { line, name } if name == "import" => {
             parse_import(tokens, i + 1, *line)
@@ -371,13 +369,17 @@ fn is_eof(token: &Token) -> bool {
     }
 }
 
-pub fn parse(tokens: &[Token]) -> Fallible<File> {
+fn parse_tokens(tokens: &[Token]) -> Fallible<Vec<Decl>> {
     let mut i = 0;
-    let mut decls = File::new();
+    let mut decls = vec![];
     while !is_eof(&tokens[i]) {
         let (new_i, decl) = parse_declaration(tokens, i)?;
         i = expect(tokens, new_i, ';')?;
         decls.push(decl);
     }
     Ok(decls)
+}
+
+pub fn parse(input: &str) -> Fallible<Vec<Decl>> {
+    parse_tokens(&tokenize(input)?)
 }

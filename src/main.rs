@@ -1,8 +1,8 @@
-use crate::lexer::tokenize;
-
 mod error;
 mod lexer;
 mod parser;
+mod semantics;
+mod loader;
 
 fn main() {
     let source_code = "
@@ -71,13 +71,7 @@ fn main() {
         return result;
     };";
 
-    let tokens = match tokenize(source_code) {
-        Ok(tokens) => tokens,
-        Err(e) => panic!("{:?}", e)
-    };
-    println!("{:?}\n\n\n", tokens);
-
-    let file = match parser::parse(&tokens) {
+    let file = match parser::parse(source_code) {
         Ok(file) => file,
         Err(e) => panic!("{:?}", e)
     };
