@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 mod error;
 mod lexer;
 mod parser;
@@ -5,17 +7,20 @@ mod semantics;
 mod loader;
 
 fn main() {
-    let source_code = "
-    import \"math\";
-    extern alert : Func[(), text];
-
+    let mut files = HashMap::new();
+    files.insert("math.zyba".to_string(), "
     factorial = fun[n: int] int {
         result = 1;
         for i : n {
             result = result * i;
         };
         return result;
-    };
+    };".to_string());
+
+    files.insert("main.zyba".to_string(), "
+    import \"math.zyba\";
+    extern alert : Func[(), text];
+
 
     private circleArea = fun[radius: real] real {
         return radius * radius * maths.pi;
@@ -69,11 +74,18 @@ fn main() {
             i = i + 1;
         };
         return result;
-    };";
+    };".to_string());
 
-    let file = match parser::parse(source_code) {
-        Ok(file) => file,
+    let fs = loader::playground_fs(files);
+
+    match loader::load(&fs, "main.zyba") {
+        Ok((main_path, files)) => {
+            println!("Main: {}", main_path);
+            for (name, decls) in files {
+                println!("File: {}", name);
+                println!("Content: {:?}", decls);
+            }
+        },
         Err(e) => panic!("{:?}", e)
     };
-    println!("{:?}\n\n\n", file);
 }

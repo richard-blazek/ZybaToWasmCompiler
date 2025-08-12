@@ -36,6 +36,13 @@ use std::path::Path;
 use crate::error::{Fallible, err};
 use crate::parser;
 
+fn to_fallible<T, E: std::fmt::Display>(x: Result<T, E>) -> Fallible<T> {
+    match x {
+        Ok(value) => Ok(value),
+        Err(error) => err(0, error.to_string())
+    }
+}
+
 pub trait FileSystem {
     fn read(&self, path: &str) -> Fallible<String>;
     fn to_absolute(&self, path: &str, anchor: Option<&str>) -> Fallible<String>;
@@ -45,10 +52,7 @@ struct SystemFS;
 
 impl FileSystem for SystemFS {
     fn read(&self, path: &str) -> Fallible<String> {
-        match fs::read_to_string(path) {
-            Ok(input) => Ok(input),
-            Err(error) => err(0, error.to_string())?
-        }
+        to_fallible(fs::read_to_string(path))
     }
 
     fn to_absolute(&self, path: &str, anchor: Option<&str>) -> Fallible<String> {
@@ -57,10 +61,8 @@ impl FileSystem for SystemFS {
             let dir = anchor_path.parent().unwrap_or(anchor_path);
             Ok(dir.join(path).to_string_lossy().to_string())
         } else {
-            match Path::new(path).canonicalize() {
-                Ok(new_path) => Ok(new_path.to_string_lossy().to_string()),
-                Err(error) => err(0, error.to_string())
-            }
+            let new_path = to_fallible(Path::new(path).canonicalize())?;
+            Ok(new_path.to_string_lossy().to_string())
         }
     }
 }
@@ -69,30 +71,28 @@ pub fn system_fs() -> impl FileSystem {
     SystemFS
 }
 
-struct PlaygroundFS {
-    filename: String,
-    content: String
-}
+struct PlaygroundFS(HashMap<String, String>);
 
 impl FileSystem for PlaygroundFS {
     fn read(&self, path: &str) -> Fallible<String> {
-        if path == self.filename {
-            Ok(self.content.clone())
+        if let Some(content) = self.0.get(path) {
+            Ok(content.clone())
         } else {
             err(0, format!("File does not exist: {}", path))
         }
     }
 
     fn to_absolute(&self, path: &str, _anchor: Option<&str>) -> Fallible<String> {
-        Ok(path.to_string())
+        if let Some(name) = Path::new(path).file_name() {
+            Ok(name.to_string_lossy().to_string())
+        } else {
+            err(0, format!("No valid file name: {}", path))
+        }
     }
 }
 
-pub fn playground_fs(filename: &str, content: &str) -> impl FileSystem {
-    PlaygroundFS {
-        filename: filename.to_string(),
-        content: content.to_string(),
-    }
+pub fn playground_fs(files: HashMap<String, String>) -> impl FileSystem {
+    PlaygroundFS(files)
 }
 
 fn load_module<FS: FileSystem>(fs: &FS, path: &str) -> Fallible<(Vec<parser::Decl>, Vec<String>)> {
