@@ -69,6 +69,32 @@ pub fn system_fs() -> impl FileSystem {
     SystemFS
 }
 
+struct PlaygroundFS {
+    filename: String,
+    content: String
+}
+
+impl FileSystem for PlaygroundFS {
+    fn read(&self, path: &str) -> Fallible<String> {
+        if path == self.filename {
+            Ok(self.content.clone())
+        } else {
+            err(0, format!("File does not exist: {}", path))
+        }
+    }
+
+    fn to_absolute(&self, path: &str, _anchor: Option<&str>) -> Fallible<String> {
+        Ok(path.to_string())
+    }
+}
+
+pub fn playground_fs(filename: &str, content: &str) -> impl FileSystem {
+    PlaygroundFS {
+        filename: filename.to_string(),
+        content: content.to_string(),
+    }
+}
+
 fn load_module<FS: FileSystem>(fs: &FS, path: &str) -> Fallible<(Vec<parser::Decl>, Vec<String>)> {
     let input = fs.read(path)?;
     let mut decls = parser::parse(&input)?;
@@ -83,7 +109,7 @@ fn load_module<FS: FileSystem>(fs: &FS, path: &str) -> Fallible<(Vec<parser::Dec
     Ok((decls, imports))
 }
 
-fn load_modules<FS: FileSystem>(fs: &FS, main_path: &str) -> Fallible<(String, HashMap<String, Vec<parser::Decl>>)> {
+pub fn load<FS: FileSystem>(fs: &FS, main_path: &str) -> Fallible<(String, HashMap<String, Vec<parser::Decl>>)> {
     let main_path = fs.to_absolute(main_path, None)?;
     let mut files = HashMap::new();
     let mut remaining = vec![main_path.clone()];
