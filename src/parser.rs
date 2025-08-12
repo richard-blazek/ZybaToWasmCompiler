@@ -96,8 +96,9 @@ fn parse_atom(tokens: &[Token], i: usize) -> Fallible<(usize, Value)> {
 }
 
 fn parse_parentheses(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Value)> {
-    if let (Some(Token::Name { .. }),
-            Some(Token::Separator { name: ':', .. })) = (tokens.get(i), tokens.get(i + 1)) {
+    if let Token::Separator { name: ')', .. } = &tokens[i] {
+        Ok((i + 1, Value::Record { line, fields: HashMap::new() }))
+    } else if let Some(Token::Separator { name: ':', .. }) = tokens.get(i + 1) {
         parse_record(tokens, i, line)
     } else {
         let (i, value) = parse_value(tokens, i)?;

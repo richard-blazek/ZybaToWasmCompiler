@@ -7,7 +7,7 @@ mod loader;
 fn main() {
     let source_code = "
     import \"math\";
-    extern alert : Func[void, text];
+    extern alert : Func[(), text];
 
     factorial = fun[n: int] int {
         result = 1;
