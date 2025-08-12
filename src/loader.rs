@@ -35,57 +35,64 @@ use std::path::Path;
 
 use crate::error::{Fallible, err};
 use crate::parser;
-use crate::semantics;
 
-struct Module {
-    decls: Vec<parser::Decl>,
-    imports: Vec<String>
+pub trait FileSystem {
+    fn read(&self, path: &str) -> Fallible<String>;
+    fn to_absolute(&self, path: &str, anchor: Option<&str>) -> Fallible<String>;
 }
 
-type Cache = HashMap<String, Module>;
+struct SystemFS;
 
-fn propagate_err<T, E: std::fmt::Display>(r: Result<T, E>) -> Fallible<T> {
-    match r {
-        Ok(value) => Ok(value),
-        Err(error) => err(0, error.to_string())
+impl FileSystem for SystemFS {
+    fn read(&self, path: &str) -> Fallible<String> {
+        match fs::read_to_string(path) {
+            Ok(input) => Ok(input),
+            Err(error) => err(0, error.to_string())?
+        }
+    }
+
+    fn to_absolute(&self, path: &str, anchor: Option<&str>) -> Fallible<String> {
+        if let Some(anchor) = anchor {
+            let anchor_path = Path::new(anchor);
+            let dir = anchor_path.parent().unwrap_or(anchor_path);
+            Ok(dir.join(path).to_string_lossy().to_string())
+        } else {
+            match Path::new(path).canonicalize() {
+                Ok(new_path) => Ok(new_path.to_string_lossy().to_string()),
+                Err(error) => err(0, error.to_string())
+            }
+        }
     }
 }
 
-fn parse_file(path: &str) -> Fallible<Vec<parser::Decl>> {
-    match fs::read_to_string(path) {
-        Ok(input) => parser::parse(&input),
-        Err(error) => err(0, error.to_string())?
-    }
+pub fn system_fs() -> impl FileSystem {
+    SystemFS
 }
 
-fn to_absolute(importer: &str, importee: &str) -> String {
-    let importer = Path::new(importer);
-    if Path::new(importee).is_absolute() {
-        importee.to_string()
-    } else {
-        let dir = importer.parent().unwrap_or(importer);
-        let absolute = dir.join(importee);
-        absolute.to_string_lossy().to_string()
-    }
-}
-
-fn load_module(path: &str) -> Fallible<Module> {
-    let mut decls = parse_file(path)?;
+fn load_module<FS: FileSystem>(fs: &FS, path: &str) -> Fallible<(Vec<parser::Decl>, Vec<String>)> {
+    let input = fs.read(path)?;
+    let mut decls = parser::parse(&input)?;
     let mut imports = vec![];
     for i in 0..decls.len() {
         if let parser::Decl::Import { line, path: import } = &decls[i] {
-            let abs_path = to_absolute(path, import.as_str());
-            imports.push(abs_path.clone());
-            decls[i] = parser::Decl::Import { line: *line, path: abs_path };
+            let absolute = fs.to_absolute(import.as_str(), Some(path))?;
+            imports.push(absolute.clone());
+            decls[i] = parser::Decl::Import { line: *line, path: absolute };
         }
     }
-    Ok(Module { decls, imports })
+    Ok((decls, imports))
 }
 
-fn lookup_cache<'a>(cache: &'a mut Cache, path: &str) -> Fallible<&'a Module> {
-    if !cache.contains_key(path) {
-        let file = load_module(path)?;
-        cache.insert(path.to_string(), file);
+fn load_modules<FS: FileSystem>(fs: &FS, main_path: &str) -> Fallible<(String, HashMap<String, Vec<parser::Decl>>)> {
+    let main_path = fs.to_absolute(main_path, None)?;
+    let mut files = HashMap::new();
+    let mut remaining = vec![main_path.clone()];
+    while let Some(path) = remaining.pop() {
+        if !files.contains_key(&path) {
+            let (decls, mut imports) = load_module(fs, &path)?;
+            files.insert(path, decls);
+            remaining.append(&mut imports);
+        }
     }
-    Ok(&cache[path])
+    Ok((main_path, files))
 }
