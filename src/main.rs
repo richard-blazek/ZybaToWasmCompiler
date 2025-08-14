@@ -3,7 +3,7 @@ use std::collections::HashMap;
 mod error;
 mod lexer;
 mod parser;
-mod semantics;
+mod name_resolution;
 mod loader;
 
 fn main() {
