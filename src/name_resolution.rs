@@ -1,32 +1,26 @@
 use std::collections::HashMap;
 
-use crate::error::{Fallible, err};
 use crate::parser;
 
-struct VarCounter(i64);
+struct VarCounter {
+    modules: HashMap<String, i64>,
+    locals: i64
+}
 
 impl VarCounter {
-    fn global(&self, file: &str, name: &str) -> Fallible<String> {
-        let file = if let Some(pos) = file.rfind(|c| c == '/' || c == '\\') {
-            &file[pos+1..]
+    fn global(&mut self, file: &str, name: &str) -> String {
+        if let Some(id) = self.modules.get(file) {
+            format!("_global{}_{}", id, name)
         } else {
-            file
-        };
-        let file = if file.ends_with(".zyba") {
-            &file[0..file.len()-5]
-        } else {
-            file
-        };
-        if file.chars().all(|c| c.is_ascii_alphanumeric()) {
-            Ok(format!("_global_{}_{}", file, name))
-        } else {
-            err(0, format!("File name {} must be alphanumeric", file))
+            let id = self.modules.len() as i64;
+            self.modules.insert(file.to_string(), id);
+            format!("_global{}_{}", id, name)
         }
     }
 
     fn local(&mut self) -> String {
-        self.0 += 1;
-        format!("_local_{}", self.0)
+        self.locals += 1;
+        format!("_local{}", self.locals)
     }
 }
 

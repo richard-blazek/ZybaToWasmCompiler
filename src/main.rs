@@ -19,8 +19,6 @@ fn main() {
 
     files.insert("main.zyba".to_string(), "
     import \"math.zyba\";
-    extern alert : Func[(), text];
-
 
     private circleArea = fun[radius: real] real {
         return radius * radius * maths.pi;

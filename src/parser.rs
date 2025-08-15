@@ -61,7 +61,6 @@ impl Statement {
 pub enum Decl {
     Import { line: i64, path: String },
     Const { line: i64, name: String, value: Value, private: bool },
-    Extern { line: i64, name: String, type_: Value }
 }
 
 impl Decl {
@@ -69,7 +68,6 @@ impl Decl {
         match self {
             Decl::Import { line, .. } => *line,
             Decl::Const { line, .. } => *line,
-            Decl::Extern { line, .. } => *line,
         }
     }
 }
@@ -319,16 +317,6 @@ fn parse_import(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Decl)
     }
 }
 
-fn parse_extern(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Decl)> {
-    if let Token::Name { name, .. } = &tokens[i] {
-        let i = expect(tokens, i + 1, ':')?;
-        let (i, type_) = parse_value(tokens, i)?;
-        Ok((i, Decl::Extern { line, name: name.clone(), type_ }))
-    } else {
-        err(line, "Expected a name after 'extern'".into())
-    }
-}
-
 fn parse_const(tokens: &[Token], i: usize, line: i64, name: String, private: bool) -> Fallible<(usize, Decl)> {
     if let Token::Operator { name: op, .. } = &tokens[i] && op == "=" {
         let (i, value) = parse_value(tokens, i + 1)?;
@@ -342,9 +330,6 @@ fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Decl)> {
     match &tokens[i] {
         Token::Name { line, name } if name == "import" => {
             parse_import(tokens, i + 1, *line)
-        }
-        Token::Name { line, name } if name == "extern" => {
-            parse_extern(tokens, i + 1, *line)
         }
         Token::Name { line, name } if name == "private" => {
             if let Token::Name { name, .. } = &tokens[i + 1] {
