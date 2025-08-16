@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
@@ -9,6 +10,16 @@ fn to_fallible<T, E: std::fmt::Display>(x: Result<T, E>) -> Fallible<T> {
     match x {
         Ok(value) => Ok(value),
         Err(error) => err(0, error.to_string())
+    }
+}
+
+fn is_valid_path(path: &str) -> bool {
+    if let Some(name) = path.split('/').last() && name.is_ascii() {
+        name.ends_with(".zyba") && name.len() > 5
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && name.chars().nth(0).unwrap().is_ascii_alphabetic()
+    } else {
+        false
     }
 }
 
@@ -25,17 +36,16 @@ impl FileSystem for SystemFS {
     }
 
     fn to_absolute(&self, path: &str, anchor: Option<&str>) -> Fallible<String> {
-        let anchored = if let Some(anchor) = anchor {
-            let anchor_path = Path::new(anchor);
-            let anchor_dir = anchor_path.parent().unwrap_or(anchor_path);
-            let anchored = anchor_dir.join(path);
-            anchored.to_string_lossy().to_string()
-        } else {
-            path.to_string()
-        };
+        let anchor = Path::new(anchor.unwrap_or("."));
+        let dir = anchor.parent().unwrap_or(anchor);
+        let cpath = to_fallible(dir.join(path).canonicalize())?;
 
-        let canonical = to_fallible(Path::new(&anchored).canonicalize())?;
-        Ok(canonical.to_string_lossy().to_string())
+        let result = cpath.to_string_lossy().replace('\\', "/");
+        if is_valid_path(&result) {
+            Ok(result)
+        } else {
+            err(0, format!("File name '{}' is not valid; expected format like: dir1/dir2/file.zyba", result))
+        }
     }
 }
 
@@ -55,10 +65,10 @@ impl FileSystem for PlaygroundFS {
     }
 
     fn to_absolute(&self, path: &str, _anchor: Option<&str>) -> Fallible<String> {
-        if let Some(name) = path.split('/').last() {
-            Ok(name.to_string())
+        if is_valid_path(path) {
+            Ok(path.to_string())
         } else {
-            err(0, format!("No valid file name: {}", path))
+            err(0, format!("Invalid file name: {}", path))
         }
     }
 }

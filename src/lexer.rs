@@ -47,12 +47,8 @@ fn parse_digit(c: char) -> u64 {
     }
 }
 
-fn is_alpha(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
-}
-
 fn is_alnum(c: char) -> bool {
-    is_alpha(c) || c.is_digit(10)
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 fn is_operator(c: char) -> bool {
@@ -68,10 +64,10 @@ fn new_state(line: i64, c: char) -> Fallible<State> {
         '"' => Ok(State::Text(String::new(), false)),
         '#' => Ok(State::Comment),
         c if c.is_digit(10) => Ok(State::Int(10, parse_digit(c))),
+        c if c.is_ascii_alphabetic() => Ok(State::Name(c.to_string())),
+        c if c.is_whitespace() => Ok(State::Initial),
         c if is_operator(c) => Ok(State::Operator(c.to_string())),
         c if is_separator(c) => Ok(State::Separator(c)),
-        c if is_alpha(c) => Ok(State::Name(c.to_string())),
-        c if c.is_whitespace() => Ok(State::Initial),
         _ => err(line, format!("Invalid character: {}", c)),
     }
 }
