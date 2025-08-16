@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::error::Fallible;
+use crate::error::{err, Fallible};
 use crate::parser;
 
 trait Environment {
     fn inc_counter(&mut self) -> i64;
-    fn var_name(&self, module_path: String, name: String) -> Option<String>;
-    fn ns_path(&self, current_path: String, ns_name: String) -> Option<String>;
+    fn var_name(&self, module_path: &str, name: &str) -> Option<String>;
+    fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String>;
 }
 
 struct GlobalEnv {
@@ -42,22 +42,22 @@ impl Environment for GlobalEnv {
         self.counter
     }
 
-    fn var_name(&self, module_path: String, name: String) -> Option<String> {
-        self.consts.get(&(module_path, name)).cloned()
+    fn var_name(&self, module_path: &str, name: &str) -> Option<String> {
+        self.consts.get(&(module_path.to_string(), name.to_string())).cloned()
     }
 
-    fn ns_path(&self, current_path: String, ns_name: String) -> Option<String> {
-        self.imports.get(&(current_path, ns_name)).cloned()
+    fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String> {
+        self.imports.get(&(module_path.to_string(), ns_name.to_string())).cloned()
     }
 }
 
-struct LocalEnv {
-    parent: Box<dyn Environment>,
+struct LocalEnv<'a> {
+    parent: &'a mut dyn Environment,
     locals: HashMap<String, String>,
-    module_path: String
+    module_path: &'a str
 }
 
-impl LocalEnv {
+impl<'a> LocalEnv<'a> {
     fn insert(&mut self, name: String) -> Option<String> {
         if self.locals.contains_key(&name) {
             None
@@ -68,52 +68,96 @@ impl LocalEnv {
         }
     }
 
-    fn new_module(parent: GlobalEnv, module_path: String, decls: &Vec<parser::Decl>) -> LocalEnv {
-        let mut env = LocalEnv { parent: Box::new(parent), locals: HashMap::new(), module_path };
-
+    fn new_module(parent: &'a mut GlobalEnv, module_path: &'a str, decls: &Vec<parser::Decl>) -> LocalEnv<'a> {
+        let mut env = LocalEnv { parent, module_path, locals: HashMap::new() };
         for decl in decls {
             if let parser::Decl::Const { name, private: true, .. } = decl {
                 env.insert(name.clone());
             }
         }
-
         env
     }
 
-    fn new_scope(parent: LocalEnv) -> LocalEnv {
-        let module_path = parent.module_path.clone();
-        LocalEnv { parent: Box::new(parent), locals: HashMap::new(), module_path }
+    fn new_scope(parent: &'a mut LocalEnv) -> LocalEnv<'a> {
+        let module_path = parent.module_path;
+        LocalEnv { parent, locals: HashMap::new(), module_path }
     }
 }
 
-impl Environment for LocalEnv {
+impl<'a> Environment for LocalEnv<'a> {
     fn inc_counter(&mut self) -> i64 {
         self.parent.inc_counter()
     }
 
-    fn var_name(&self, module_path: String, name: String) -> Option<String> {
-        if let Some(uniq) = self.locals.get(&name) && module_path == self.module_path {
+    fn var_name(&self, module_path: &str, name: &str) -> Option<String> {
+        if let Some(uniq) = self.locals.get(name) && module_path == self.module_path {
             Some(uniq.to_string())
         } else {
             self.parent.var_name(module_path, name)
         }
     }
 
-    fn ns_path(&self, current_path: String, ns_name: String) -> Option<String> {
-        self.parent.ns_path(current_path, ns_name)
+    fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String> {
+        self.parent.ns_path(module_path, ns_name)
     }
 }
 
-struct Locals(i64);
-
-impl Locals {
-    fn new(&mut self) -> String {
-        self.0 += 1;
-        format!("_local{}", self.0)
+fn resolve_value<'a>(line: i64, val: parser::Value, module_path: &str, env: &'a mut LocalEnv) -> Fallible<parser::Value> {
+    match &val {
+        parser::Value::Int { .. } => Ok(val),
+        parser::Value::Real { .. } => Ok(val),
+        parser::Value::Text { .. } => Ok(val),
+        parser::Value::Bool { .. } => Ok(val),
+        parser::Value::Var { line, ns: None, name } => {
+            if let Some(new_name) = env.var_name(module_path, name) {
+                Ok(parser::Value::Var { line: *line, ns: None, name: new_name })
+            } else {
+                err(*line, format!("Undefined identifier '{}'", name))
+            }
+        }
+        parser::Value::Var { line, ns: Some(ns_name), name } => {
+            if let Some(ns_path) = env.ns_path(module_path, ns_name) {
+                if let Some(new_name) = env.var_name(&ns_path, &name) {
+                    Ok(parser::Value::Var { line: *line, ns: None, name: new_name })
+                } else {
+                    err(*line, format!("Undefined identifier '{}'", name))
+                }
+            } else {
+                err(*line, format!("Unknown module '{}'", ns_name))
+            }
+        }
+        parser::Value::Record { line, fields } => todo!(),
+        parser::Value::Call { line, func, args } => todo!(),
+        parser::Value::BinOp { line, name, lhs, rhs } => todo!(),
+        parser::Value::Access { line, object, field } => todo!(),
+        parser::Value::Lambda { line, args, return_type, body } => todo!(),
     }
 }
 
-pub fn resolve(main: String, files: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, parser::Value>)> {
-    let global_env = GlobalEnv::new(&files);
-    todo!();
+pub fn resolve(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, parser::Value>)> {
+    let mut global_env = GlobalEnv::new(&modules);
+    let mut result = HashMap::new();
+    let mut main_name = None;
+
+    for (module_path, decls) in modules {
+        let mut module_env = LocalEnv::new_module(&mut global_env, &module_path, &decls);
+        for decl in decls {
+            if let parser::Decl::Const { line, name, value, .. } = decl {
+                let new_name = module_env.var_name(&module_path, &name).unwrap();
+                let new_value = resolve_value(line, value, &module_path, &mut module_env)?;
+
+                if module_path == main && name == "main" {
+                    main_name = Some(new_name.clone());
+                }
+
+                result.insert(new_name, new_value);
+            }
+        }
+    }
+
+    if let Some(main_name) = main_name {
+        Ok((main_name, result))
+    } else {
+        err(0, "No main function defined".into())
+    }
 }

@@ -10,7 +10,7 @@ pub enum Value {
     Text { line: i64, value: String },
     Bool { line: i64, value: bool },
     Record { line: i64, fields: HashMap<String, Value> },
-    Var { line: i64, module: Option<String>, name: String },
+    Var { line: i64, ns: Option<String>, name: String },
     Call { line: i64, func: Box<Value>, args: Vec<Value> },
     BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
@@ -140,9 +140,9 @@ fn parse_var(tokens: &[Token], i: usize, line: i64, first_name: String) -> Falli
     if let (Some(Token::Separator { name: ':', .. }),
             Some(Token::Separator { name: ':', .. }),
             Some(Token::Name { name, .. })) = (tokens.get(i), tokens.get(i + 1), tokens.get(i + 2)) {
-        Ok((i + 3, Value::Var { line, module: Some(first_name), name: name.clone() }))
+        Ok((i + 3, Value::Var { line, ns: Some(first_name), name: name.clone() }))
     } else {
-        Ok((i, Value::Var { line, module: None, name: first_name}))
+        Ok((i, Value::Var { line, ns: None, name: first_name}))
     }
 }
 
