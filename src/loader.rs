@@ -25,14 +25,17 @@ impl FileSystem for SystemFS {
     }
 
     fn to_absolute(&self, path: &str, anchor: Option<&str>) -> Fallible<String> {
-        if let Some(anchor) = anchor {
+        let anchored = if let Some(anchor) = anchor {
             let anchor_path = Path::new(anchor);
-            let dir = anchor_path.parent().unwrap_or(anchor_path);
-            Ok(dir.join(path).to_string_lossy().to_string())
+            let anchor_dir = anchor_path.parent().unwrap_or(anchor_path);
+            let anchored = anchor_dir.join(path);
+            anchored.to_string_lossy().to_string()
         } else {
-            let new_path = to_fallible(Path::new(path).canonicalize())?;
-            Ok(new_path.to_string_lossy().to_string())
-        }
+            path.to_string()
+        };
+
+        let canonical = to_fallible(Path::new(&anchored).canonicalize())?;
+        Ok(canonical.to_string_lossy().to_string())
     }
 }
 
@@ -52,8 +55,8 @@ impl FileSystem for PlaygroundFS {
     }
 
     fn to_absolute(&self, path: &str, _anchor: Option<&str>) -> Fallible<String> {
-        if let Some(name) = Path::new(path).file_name() {
-            Ok(name.to_string_lossy().to_string())
+        if let Some(name) = path.split('/').last() {
+            Ok(name.to_string())
         } else {
             err(0, format!("No valid file name: {}", path))
         }

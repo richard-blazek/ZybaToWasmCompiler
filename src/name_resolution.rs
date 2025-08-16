@@ -1,30 +1,35 @@
 use std::collections::HashMap;
 
+use crate::error::Fallible;
 use crate::parser;
 
-struct VarCounter {
-    modules: HashMap<String, i64>,
-    locals: i64
-}
+struct Locals(i64);
 
-impl VarCounter {
-    fn global(&mut self, file: &str, name: &str) -> String {
-        if let Some(id) = self.modules.get(file) {
-            format!("_global{}_{}", id, name)
-        } else {
-            let id = self.modules.len() as i64;
-            self.modules.insert(file.to_string(), id);
-            format!("_global{}_{}", id, name)
-        }
-    }
-
+impl Locals {
     fn local(&mut self) -> String {
-        self.locals += 1;
-        format!("_local{}", self.locals)
+        self.0 += 1;
+        format!("_local{}", self.0)
     }
 }
 
-pub fn resolve(main: String, files: HashMap<String, Vec<parser::Decl>>) -> Vec<parser::Decl> {
+fn mangle_globals(files: &mut HashMap<String, Vec<parser::Decl>>) -> HashMap<(String, String), String> {
+    let mut map = HashMap::new();
+    let mut i = 0;
+    for (file, decls) in files {
+        for decl in decls {
+            if let parser::Decl::Const { name, .. } = decl {
+                let k = (file.clone(), name.clone());
+                let v = format!("_global{}_{}", i, name);
+                *name = v.clone();
+                map.insert(k, v);
+            }
+        }
+        i += 1;
+    }
+    map
+}
+
+pub fn resolve(main: String, mut files: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, Vec<parser::Decl>)> {
+    let globals_map = mangle_globals(&mut files);
     todo!();
-    files[main.as_str()].clone()
 }
