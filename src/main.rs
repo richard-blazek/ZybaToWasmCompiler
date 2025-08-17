@@ -15,13 +15,16 @@ fn main() {
             result = result * i;
         };
         return result;
-    };".to_string());
+    };
+    
+    pi = 3.142;
+    ".to_string());
 
     files.insert("main.zyba".to_string(), "
     import \"math.zyba\";
 
     private circleArea = fun[radius: real] real {
-        return radius * radius * maths.pi;
+        return radius * radius * math::pi;
     };
 
     isPrime = fun[n: int] bool {
@@ -72,18 +75,41 @@ fn main() {
             i = i + 1;
         };
         return result;
+    };
+    
+    main = fun[] () {
+        nums_to_120 = range[math::factorial[5]];
+        for i, num : nums_to_120 {
+            print[i];
+            print[num];
+        };
     };".to_string());
 
     let fs = loader::playground_fs(files);
 
-    match loader::load(&fs, "main.zyba") {
+    let (main_path, files) = match loader::load(&fs, "main.zyba") {
         Ok((main_path, files)) => {
-            println!("Main: {}", main_path);
-            for (name, decls) in files {
-                println!("File: {}", name);
-                println!("Content: {:?}", decls);
-            }
+            (main_path, files)
         },
         Err(e) => panic!("{:?}", e)
     };
+
+    println!("Main: {}", main_path);
+    for (name, decls) in files.iter() {
+        println!("File: {}", name);
+        println!("Content: {:?}", decls);
+    }
+
+    let (main_fn, decls) = match name_resolution::resolve(main_path, files) {
+        Ok((main_fn, decls)) => {
+            (main_fn, decls)
+        }
+        Err(e) => panic!("{:?}", e)
+    };
+
+    println!("Main function: {}", main_fn);
+    for (name, value) in decls.iter() {
+        println!("Declaration: {}", name);
+        println!("Value: {:?}", value);
+    }
 }

@@ -110,6 +110,10 @@ fn parse_key_value_pairs(tokens: &[Token], i: usize, end: char) -> Fallible<(usi
     let mut keys = HashSet::new();
     let mut pairs = Vec::new();
 
+    if let Token::Separator { name: c, .. } = &tokens[i] && *c == end {
+        return Ok((i + 1, pairs));
+    }
+
     loop {
         if let (Some(Token::Name { name, line }),
                 Some(Token::Separator { name: ':', .. })) = (tokens.get(i), tokens.get(i + 1)) {

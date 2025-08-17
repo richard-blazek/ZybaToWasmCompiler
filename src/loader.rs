@@ -14,9 +14,13 @@ fn to_fallible<T, E: std::fmt::Display>(x: Result<T, E>) -> Fallible<T> {
 
 fn is_valid_path(path: &str) -> bool {
     if let Some(name) = path.split('/').last() && name.is_ascii() {
-        name.ends_with(".zyba") && name.len() > 5
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && name.chars().nth(0).unwrap().is_ascii_alphabetic()
+        if let Some((stem, "zyba")) = name.split_once('.') {
+            !stem.is_empty()
+            && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && stem.chars().nth(0).unwrap().is_ascii_alphabetic()
+        } else {
+            false
+        }
     } else {
         false
     }
