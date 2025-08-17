@@ -14,7 +14,7 @@ fn main() {
         result = 1;
         for i : n {
             result = result * i;
-        };
+        }
         return result;
     };
     
@@ -40,8 +40,8 @@ fn main() {
             while i * i <= n && prime {
                 prime = n % i != 0;
                 i = i + 1;
-            };
-        };
+            }
+        }
         return prime;
     };
 
@@ -49,7 +49,7 @@ fn main() {
         total = 0;
         for index, value : n {
             total = total + value;
-        };
+        }
         return total;
     };
 
@@ -59,7 +59,7 @@ fn main() {
         while i < n {
             result.append[i + 1];
             i = i + 1;
-        };
+        }
         return result;
     };
 
@@ -67,7 +67,7 @@ fn main() {
         result = int.list;
         for item : LoL {
             result.append[item];
-        };
+        }
         return result;
     };
 
@@ -77,7 +77,7 @@ fn main() {
         while (i < a.count) && (i < b.count) {
             result.append[a.get[i], b.get[i]];
             i = i + 1;
-        };
+        }
         return result;
     };
     
@@ -86,7 +86,7 @@ fn main() {
         for i, num : nums_to_120 {
             print[i];
             print[num];
-        };
+        }
     };".to_string());
 
     let fs = filesystem::playground_fs(files);

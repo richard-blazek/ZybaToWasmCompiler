@@ -206,6 +206,33 @@ fn parse_if(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Statement
     }
 }
 
+fn parse_statement(tokens: &[Token], i: usize) -> Fallible<(usize, Statement)> {
+    match (&tokens[i], tokens.get(i + 1)) {
+        (Token::Name { line, name }, _) if name == "if" => {
+            parse_if(tokens, i + 1, *line)
+        }
+        (Token::Name { line, name }, _) if name == "while" => {
+            parse_while(tokens, i + 1, *line)
+        }
+        (Token::Name { line, name }, _) if name == "return" => {
+            parse_return(tokens, i + 1, *line)
+        }
+        (Token::Name { line, name }, Some(Token::Name { name: var, .. })) if name == "for" => {
+            parse_for(tokens, i + 2, *line, var.clone())
+        }
+        (Token::Name { line, name }, Some(Token::Operator { name: op, .. })) if op == "=" => {
+            let (i, value) = parse_value(tokens, i + 2)?;
+            let i = expect(tokens, i, ';')?;
+            Ok((i, Statement::Assignment { line: *line, name: name.clone(), value }))
+        }
+        (token, _) => {
+            let (i, value) = parse_value(tokens, i)?;
+            let i = expect(tokens, i, ';')?;
+            Ok((i, Statement::Value { line: token.line(), value }))
+        }
+    }
+}
+
 fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Statement>)> {
     let mut i = expect(tokens, i, '{')?;
     let mut stmts = vec![];
@@ -215,8 +242,8 @@ fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Statement>)> 
             return Ok((i + 1, stmts))
         }
         let (new_i, stmt) = parse_statement(tokens, i)?;
+        i = new_i;
         stmts.push(stmt);
-        i = expect(tokens, new_i, ';')?;
     }
 }
 
@@ -228,6 +255,7 @@ fn parse_while(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Statem
 
 fn parse_return(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Statement)> {
     let (i, value) = parse_value(tokens, i)?;
+    let i = expect(tokens, i, ';')?;
     Ok((i, Statement::Return { line, value }))
 }
 
@@ -245,31 +273,6 @@ fn parse_for(tokens: &[Token], i: usize, line: i64, var1: String) -> Fallible<(u
             Ok((i, Statement::For { line, key: Some(var1), value: var2.clone(), expr, body }))
         } else {
             err(line, "Expected a variable name".into())
-        }
-    }
-}
-
-fn parse_statement(tokens: &[Token], i: usize) -> Fallible<(usize, Statement)> {
-    match (&tokens[i], tokens.get(i + 1)) {
-        (Token::Name { line, name }, _) if name == "if" => {
-            parse_if(tokens, i + 1, *line)
-        }
-        (Token::Name { line, name }, _) if name == "while" => {
-            parse_while(tokens, i + 1, *line)
-        }
-        (Token::Name { line, name }, _) if name == "return" => {
-            parse_return(tokens, i + 1, *line)
-        }
-        (Token::Name { line, name }, Some(Token::Name { name: var, .. })) if name == "for" => {
-            parse_for(tokens, i + 2, *line, var.clone())
-        }
-        (Token::Name { line, name }, Some(Token::Operator { name: op, .. })) if op == "=" => {
-            let (i, value) = parse_value(tokens, i + 2)?;
-            Ok((i, Statement::Assignment { line: *line, name: name.clone(), value }))
-        }
-        (token, _) => {
-            let (i, value) = parse_value(tokens, i)?;
-            Ok((i, Statement::Value { line: token.line(), value }))
         }
     }
 }
