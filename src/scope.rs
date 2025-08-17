@@ -5,6 +5,13 @@ use crate::error::{err, Fallible};
 use crate::parser;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+    Scalar { line: i64, name: String },
+    Generic { line: i64, template: Box<Type>, args: Vec<Type> },
+    Record { line: i64, fields: HashMap<String, Type> }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int { line: i64, value: u64 },
     Real { line: i64, value: f64 },
@@ -15,7 +22,7 @@ pub enum Value {
     Call { line: i64, func: Box<Value>, args: Vec<Value> },
     BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
-    Lambda { line: i64, args: Vec<(String, Value)>, return_type: Box<Value>, body: Vec<Statement> }
+    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Statement> }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,7 +151,7 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn nr_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Statement>> {
+fn nr_block(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Statement>> {
     let mut result = vec![];
 
     for stm in stms {
@@ -194,7 +201,40 @@ fn nr_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalE
     Ok(result)
 }
 
-fn nr_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) -> Fallible<Value> {
+fn nr_type(val: parser::Value) -> Fallible<Type> {
+    use parser::Value::*;
+
+    match val {
+        Var { line, ns, name } => {
+            if is_builtin_global(&name) {
+                Ok(Type::Scalar { line, name })
+            } else {
+                err(line, format!("Undefined type {}", name))
+            }
+        },
+        Call { line, func, args } => {
+            let template = nr_type(*func)?;
+            let args: Fallible<Vec<_>> = args.into_iter().map(nr_type).collect();
+            Ok(Type::Generic { line, template: Box::new(template), args: args? })
+        }
+        Record { line, fields } => {
+            let mut new_fields = HashMap::new();
+            for (key, value) in fields {
+                new_fields.insert(key, nr_type(value)?);
+            }
+            Ok(Type::Record { line, fields: new_fields })
+        }
+        Int { line, value } => err(line, format!("Expected a type, but got an integer {}", value)),
+        Real { line, value } => err(line, format!("Expected a type, but got a number {}", value)),
+        Text { line, value } => err(line, format!("Expected a type, but got a text {}", value)),
+        Bool { line, value } => err(line, format!("Expected a type, but got a boolean {}", value)),
+        BinOp { line, name, .. } => err(line, format!("Invalid operation {}, expected a type", name)),
+        Lambda { line, .. } => err(line, "Expected a type, but got a function".into()),
+        Access { line, field, .. } => err(line, format!("Invalid operation for a type: .{}", field)),
+    }
+}
+
+fn nr_value(val: parser::Value, module_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
     match val {
         parser::Value::Int { line, value } => Ok(Value::Int { line, value }),
         parser::Value::Real { line, value } => Ok(Value::Real { line, value }),
@@ -250,13 +290,13 @@ fn nr_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) ->
                 } else {
                     err(line, format!("Duplicate argument name {}", n))?
                 };
-                let type_ = nr_value(t, module_path, &mut inner)?;
+                let type_ = nr_type(t)?;
                 Ok((name, type_))
             }).collect();
 
             let body = nr_block(body, module_path, inner)?;
-            let return_type = nr_value(*return_type, module_path, env)?;
-            Ok(Value::Lambda { line, args: args?, return_type: Box::new(return_type), body })
+            let return_type = nr_type(*return_type)?;
+            Ok(Value::Lambda { line, args: args?, return_type, body })
         }
     }
 }
