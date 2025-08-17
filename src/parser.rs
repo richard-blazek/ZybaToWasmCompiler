@@ -17,23 +17,6 @@ pub enum Value {
     Lambda { line: i64, args: Vec<(String, Value)>, return_type: Box<Value>, body: Vec<Statement> }
 }
 
-impl Value {
-    pub fn line(&self) -> i64 {
-        match self {
-            Value::Int { line, .. } => *line,
-            Value::Real { line, .. } => *line,
-            Value::Text { line, .. } => *line,
-            Value::Bool { line, .. } => *line,
-            Value::Record { line, .. } => *line,
-            Value::Var { line, .. } => *line,
-            Value::Call { line, .. } => *line,
-            Value::BinOp { line, .. } => *line,
-            Value::Access { line, .. } => *line,
-            Value::Lambda { line, .. } => *line,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Value { line: i64, value: Value },
@@ -44,32 +27,10 @@ pub enum Statement {
     Return { line: i64, value: Value }
 }
 
-impl Statement {
-    pub fn line(&self) -> i64 {
-        match self {
-            Statement::Value { line, .. } => *line,
-            Statement::Assignment { line, .. } => *line,
-            Statement::If { line, .. } => *line,
-            Statement::While { line, .. } => *line,
-            Statement::For { line, .. } => *line,
-            Statement::Return { line, .. } => *line,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Import { line: i64, path: String },
     Const { line: i64, name: String, value: Value, private: bool },
-}
-
-impl Decl {
-    pub fn line(&self) -> i64 {
-        match self {
-            Decl::Import { line, .. } => *line,
-            Decl::Const { line, .. } => *line,
-        }
-    }
 }
 
 fn expect(tokens: &[Token], i: usize, sep: char) -> Fallible<usize> {

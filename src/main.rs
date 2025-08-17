@@ -3,6 +3,7 @@ use std::collections::HashMap;
 mod error;
 mod lexer;
 mod parser;
+mod filesystem;
 mod name_resolution;
 mod loader;
 
@@ -88,7 +89,7 @@ fn main() {
         };
     };".to_string());
 
-    let fs = loader::playground_fs(files);
+    let fs = filesystem::playground_fs(files);
 
     let (main_path, files) = match loader::load(&fs, "main.zyba") {
         Ok((main_path, files)) => {
