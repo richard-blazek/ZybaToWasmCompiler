@@ -58,13 +58,18 @@ struct LocalEnv<'a> {
 }
 
 impl<'a> LocalEnv<'a> {
-    fn insert(&mut self, name: String) -> Option<String> {
-        if self.locals.contains_key(&name) {
-            None
+    fn new_var(&mut self, name: &str, shadow_parent: bool) -> Option<String> {
+        let exists = if shadow_parent {
+            self.locals.contains_key(name)
         } else {
+            self.var_name(self.module_path, name).is_some()
+        };
+        if !exists {
             let uniq = format!("_v{}", self.inc_counter());
-            self.locals.insert(name, uniq.clone());
+            self.locals.insert(name.to_string(), uniq.clone());
             Some(uniq)
+        } else {
+            None
         }
     }
 
@@ -72,7 +77,7 @@ impl<'a> LocalEnv<'a> {
         let mut env = LocalEnv { parent, module_path, locals: HashMap::new() };
         for decl in decls {
             if let parser::Decl::Const { name, private: true, .. } = decl {
-                env.insert(name.clone());
+                env.new_var(name, true);
             }
         }
         env
@@ -114,7 +119,7 @@ fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: L
             }
             Assignment { line, name, value } => {
                 let value = resolve_value(value, module_path, &mut env)?;
-                env.insert(name.clone());
+                env.new_var(&name, false);
                 let name = env.var_name(module_path, &name).unwrap();
                 result.push(Assignment { line, name, value })
             }
@@ -132,8 +137,8 @@ fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: L
             For { line, key, value, expr, body } => {
                 let expr = resolve_value(expr, module_path, &mut env)?;
                 let mut inner = LocalEnv::new_scope(&mut env);
-                let key = key.map(|key| inner.insert(key).unwrap());
-                let value = if let Some(value) = inner.insert(value.clone()) {
+                let key = key.map(|key| inner.new_var(&key, true).unwrap());
+                let value = if let Some(value) = inner.new_var(&value, true) {
                     value
                 } else {
                     err(line, format!("Both variables in the for loop have the name {}", value))?
@@ -202,8 +207,8 @@ fn resolve_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEn
             let mut inner = LocalEnv::new_scope(env);
             let mut new_args = vec![];
             for (name, type_) in args {
-                if let Some(new_name) = inner.insert(name) {
-                    new_args.push((new_name, type_));
+                if let Some(name) = inner.new_var(&name, true) {
+                    new_args.push((name, type_));
                 } else {
                     err(line, "Argument names are not unique".into())?;
                 }
