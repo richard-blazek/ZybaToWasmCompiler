@@ -77,14 +77,16 @@ impl<'a> LocalEnv<'a> {
         }
     }
 
-    fn new_module(parent: &'a mut GlobalEnv, module_path: &'a str, decls: &Vec<parser::Decl>) -> LocalEnv<'a> {
+    fn new_module(parent: &'a mut GlobalEnv, module_path: &'a str, decls: &Vec<parser::Decl>) -> Fallible<LocalEnv<'a>> {
         let mut env = LocalEnv { parent, module_path, locals: HashMap::new() };
         for decl in decls {
-            if let parser::Decl::Const { name, private: true, .. } = decl {
-                env.new_var(name, true);
+            if let parser::Decl::Const { line, name, private: true, .. } = decl {
+                if env.new_var(name, true).is_none() {
+                    err(*line, format!("Cannot declare {} twice", name))?;
+                }
             }
         }
-        env
+        Ok(env)
     }
 
     fn new_scope(parent: &'a mut LocalEnv) -> LocalEnv<'a> {
@@ -214,7 +216,7 @@ fn nr_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) ->
                 if let Some(name) = inner.new_var(&name, true) {
                     new_args.push((name, type_));
                 } else {
-                    err(line, "Argument names are not unique".into())?;
+                    err(line, format!("Duplicate argument name {}", name))?;
                 }
             }
 
@@ -230,7 +232,7 @@ pub fn name_resolution(main: String, modules: HashMap<String, Vec<parser::Decl>>
     let mut main_name = None;
 
     for (module_path, decls) in modules {
-        let mut module_env = LocalEnv::new_module(&mut global_env, &module_path, &decls);
+        let mut module_env = LocalEnv::new_module(&mut global_env, &module_path, &decls)?;
         for decl in decls {
             if let parser::Decl::Const { name, value, .. } = decl {
                 let new_name = module_env.var_name(&module_path, &name).unwrap();
