@@ -6,11 +6,13 @@ mod parser;
 mod filesystem;
 mod scope;
 mod loader;
+mod builtin;
+mod semantics;
 
 fn main() {
     let mut files = HashMap::new();
     files.insert("math.zyba".to_string(), "
-    factorial = fun[n: int] int {
+    factorial = fun[n: Int] Int {
         result = 1;
         for i : n {
             result = result * i;
@@ -24,14 +26,13 @@ fn main() {
     files.insert("main.zyba".to_string(), "
     import \"math.zyba\";
 
-    private circleArea = fun[radius: real] real {
+    private circleArea = fun[radius: Real] Real {
         return radius * radius * math::pi;
     };
 
-    int = 0;
-    print = fun[x: int] () {};
+    print = fun[x: Int] () {};
 
-    isPrime = fun[n: int] bool {
+    isPrime = fun[n: Int] Bool {
         prime = true;
         if n < 2 {
             prime = false;
@@ -45,7 +46,7 @@ fn main() {
         return prime;
     };
 
-    sum = fun[n: int.list] int {
+    sum = fun[n: List[Int]] Int {
         total = 0;
         for index, value : n {
             total = total + value;
@@ -53,8 +54,8 @@ fn main() {
         return total;
     };
 
-    range = fun[n: int] int.list {
-        result = int.list;
+    range = fun[n: Int] List[Int] {
+        result = List[Int];
         i = 0;
         while i < n {
             result.append[i + 1];
@@ -63,16 +64,16 @@ fn main() {
         return result;
     };
 
-    private concat = fun[LoL: int.list.list] int.list {
-        result = int.list;
+    private concat = fun[LoL: List[List[Int]]] List[Int] {
+        result = List[Int];
         for item : LoL {
             result.append[item];
         }
         return result;
     };
 
-    merge = fun[a: int.list, b: int.list] int.list {
-        result = int.list;
+    merge = fun[a: List[Int], b: List[Int]] List[Int] {
+        result = List[Int];
         i = 0;
         while (i < a.count) && (i < b.count) {
             result.append[a.get[i], b.get[i]];

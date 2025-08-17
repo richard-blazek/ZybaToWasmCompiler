@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::builtin::is_builtin_global;
 use crate::error::{err, Fallible};
 use crate::parser;
 
@@ -47,7 +48,13 @@ impl Environment for GlobalEnv {
     }
 
     fn var_name(&self, module_path: &str, name: &str) -> Option<String> {
-        self.consts.get(&(module_path.to_string(), name.to_string())).cloned()
+        if let Some(name) = self.consts.get(&(module_path.to_string(), name.to_string())) {
+            Some(name.clone())
+        } else if is_builtin_global(name) {
+            Some(name.to_string())
+        } else {
+            None
+        }
     }
 
     fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String> {
@@ -220,8 +227,9 @@ fn nr_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) ->
                 }
             }
 
-            let new_body = nr_block(body, module_path, inner)?;
-            Ok(Lambda { line, args: new_args, return_type, body: new_body })
+            let body = nr_block(body, module_path, inner)?;
+            let new_return_type = nr_value(*return_type, module_path, env)?;
+            Ok(Lambda { line, args: new_args, return_type: Box::new(new_return_type), body })
         }
     }
 }
