@@ -16,23 +16,27 @@ struct GlobalEnv {
 }
 
 impl GlobalEnv {
-    fn new(files: &HashMap<String, Vec<parser::Decl>>) -> GlobalEnv {
+    fn new(files: &HashMap<String, Vec<parser::Decl>>) -> Fallible<GlobalEnv> {
         let mut consts = HashMap::new();
         let mut imports = HashMap::new();
         let mut i = 0;
         for (module_path, decls) in files {
             for decl in decls {
-                if let parser::Decl::Const { name, private: false, .. } = decl {
+                if let parser::Decl::Const { line, name, private: false, .. } = decl {
                     let uniq = format!("_m{}_{}", i, name);
-                    consts.insert((module_path.clone(), name.clone()), uniq);
-                } else if let parser::Decl::Import { path, .. } = decl {
+                    if consts.insert((module_path.clone(), name.clone()), uniq).is_some() {
+                        err(*line, format!("Cannot declare {} twice", name))?;
+                    }
+                } else if let parser::Decl::Import { line, path, .. } = decl {
                     let ns = path.split('/').last().unwrap().replace(".zyba", "");
-                    imports.insert((module_path.clone(), ns), path.clone());
+                    if imports.insert((module_path.clone(), ns.clone()), path.clone()).is_some() {
+                        err(*line, format!("Cannot import '{}', duplicate namespace {}", path, ns))?;
+                    }
                 }
             }
             i += 1;
         }
-        GlobalEnv { consts, imports, counter: 0 }
+        Ok(GlobalEnv { consts, imports, counter: 0 })
     }
 }
 
@@ -221,7 +225,7 @@ fn resolve_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEn
 }
 
 pub fn resolve(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, parser::Value>)> {
-    let mut global_env = GlobalEnv::new(&modules);
+    let mut global_env = GlobalEnv::new(&modules)?;
     let mut result = HashMap::new();
     let mut main_name = None;
 
