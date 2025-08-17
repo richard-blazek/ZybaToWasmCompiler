@@ -102,35 +102,116 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn resolve_value<'a>(line: i64, val: parser::Value, module_path: &str, env: &'a mut LocalEnv) -> Fallible<parser::Value> {
-    match &val {
-        parser::Value::Int { .. } => Ok(val),
-        parser::Value::Real { .. } => Ok(val),
-        parser::Value::Text { .. } => Ok(val),
-        parser::Value::Bool { .. } => Ok(val),
-        parser::Value::Var { line, ns: None, name } => {
-            if let Some(new_name) = env.var_name(module_path, name) {
-                Ok(parser::Value::Var { line: *line, ns: None, name: new_name })
-            } else {
-                err(*line, format!("Undefined identifier '{}'", name))
+fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<parser::Statement>> {
+    use parser::Statement::*;
+
+    let mut result = vec![];
+
+    for stm in stms {
+        match stm {
+            Value { line, value } => {
+                result.push(Value { line, value: resolve_value(value, module_path, &mut env)? });
+            }
+            Assignment { line, name, value } => {
+                let value = resolve_value(value, module_path, &mut env)?;
+                env.insert(name.clone());
+                let name = env.var_name(module_path, &name).unwrap();
+                result.push(Assignment { line, name, value })
+            }
+            If { line, cond, then, otherwise } => {
+                let cond = resolve_value(cond, module_path, &mut env)?;
+                let then = resolve_block(then, module_path, LocalEnv::new_scope(&mut env))?;
+                let otherwise = resolve_block(otherwise, module_path, LocalEnv::new_scope(&mut env))?;
+                result.push(If { line, cond, then, otherwise });
+            }
+            While { line, cond, body } => {
+                let cond = resolve_value(cond, module_path, &mut env)?;
+                let body = resolve_block(body, module_path, LocalEnv::new_scope(&mut env))?;
+                result.push(While { line, cond, body });
+            }
+            For { line, key, value, expr, body } => {
+                let expr = resolve_value(expr, module_path, &mut env)?;
+                let mut inner = LocalEnv::new_scope(&mut env);
+                let key = key.map(|key| inner.insert(key).unwrap());
+                let value = if let Some(value) = inner.insert(value.clone()) {
+                    value
+                } else {
+                    err(line, format!("Both variables in the for loop have the name {}", value))?
+                };
+                let body = resolve_block(body, module_path, inner)?;
+                result.push(For { line, key, value, expr, body });
+            }
+            Return { line, value } => {
+                let value = resolve_value(value, module_path, &mut env)?;
+                result.push(Return { line, value });
             }
         }
-        parser::Value::Var { line, ns: Some(ns_name), name } => {
-            if let Some(ns_path) = env.ns_path(module_path, ns_name) {
-                if let Some(new_name) = env.var_name(&ns_path, &name) {
-                    Ok(parser::Value::Var { line: *line, ns: None, name: new_name })
+    }
+
+    Ok(result)
+}
+
+fn resolve_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) -> Fallible<parser::Value> {
+    use parser::Value::*;
+
+    match val {
+        Int { .. } | Real { .. } | Text { .. } | Bool { .. } => Ok(val),
+        Var { line, ns: None, name } => {
+            if let Some(name) = env.var_name(module_path, &name) {
+                Ok(Var { line, ns: None, name })
+            } else {
+                err(line, format!("Undefined identifier '{}'", name))
+            }
+        }
+        Var { line, ns: Some(ns_name), name } => {
+            if let Some(ns_path) = env.ns_path(module_path, &ns_name) {
+                if let Some(name) = env.var_name(&ns_path, &name) {
+                    Ok(Var { line, ns: None, name })
                 } else {
-                    err(*line, format!("Undefined identifier '{}'", name))
+                    err(line, format!("Undefined identifier '{}'", name))
                 }
             } else {
-                err(*line, format!("Unknown module '{}'", ns_name))
+                err(line, format!("Unknown module '{}'", ns_name))
             }
         }
-        parser::Value::Record { line, fields } => todo!(),
-        parser::Value::Call { line, func, args } => todo!(),
-        parser::Value::BinOp { line, name, lhs, rhs } => todo!(),
-        parser::Value::Access { line, object, field } => todo!(),
-        parser::Value::Lambda { line, args, return_type, body } => todo!(),
+        BinOp { line, name, lhs, rhs } => {
+            let new_lhs = resolve_value(*lhs, module_path, env)?;
+            let new_rhs = resolve_value(*rhs, module_path, env)?;
+            Ok(BinOp { line, name, lhs: Box::new(new_lhs), rhs: Box::new(new_rhs) })
+        }
+        Access { line, object, field } => {
+            let new_object = resolve_value(*object, module_path, env)?;
+            Ok(Access { line, object: Box::new(new_object), field })
+        }
+        Call { line, func, args } => {
+            let new_func = resolve_value(*func, module_path, env)?;
+            let mut new_args = vec![];
+            for arg in args {
+                new_args.push(resolve_value(arg, module_path, env)?);
+            }
+            Ok(Call { line, func: Box::new(new_func), args: new_args })
+        }
+        Record { line, fields } => {
+            let mut new_fields = HashMap::new();
+            for (key, value) in fields {
+                new_fields.insert(key, resolve_value(value, module_path, env)?);
+            }
+            Ok(Record { line, fields: new_fields })
+        }
+        Lambda { line, args, return_type, body } => {
+            let mut inner = LocalEnv::new_scope(env);
+            let mut new_args = vec![];
+            for (name, type_) in args {
+                if let Some(new_name) = inner.insert(name) {
+                    new_args.push((new_name, type_));
+                } else {
+                    err(line, "Argument names are not unique".into())?;
+                }
+            }
+
+            let new_body = resolve_block(body, module_path, inner)?;
+            Ok(Lambda { line, args: new_args, return_type, body: new_body })
+        }
     }
 }
 
@@ -142,9 +223,9 @@ pub fn resolve(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fal
     for (module_path, decls) in modules {
         let mut module_env = LocalEnv::new_module(&mut global_env, &module_path, &decls);
         for decl in decls {
-            if let parser::Decl::Const { line, name, value, .. } = decl {
+            if let parser::Decl::Const { name, value, .. } = decl {
                 let new_name = module_env.var_name(&module_path, &name).unwrap();
-                let new_value = resolve_value(line, value, &module_path, &mut module_env)?;
+                let new_value = resolve_value(value, &module_path, &mut module_env)?;
 
                 if module_path == main && name == "main" {
                     main_name = Some(new_name.clone());
