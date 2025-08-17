@@ -243,24 +243,20 @@ fn nr_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) ->
             Ok(Value::Record { line, fields: new_fields })
         }
         parser::Value::Lambda { line, args, return_type, body } => {
-            let args: (Vec<String>, Vec<parser::Value>) = args.into_iter().unzip();
-            let arg_types : Fallible<Vec<_>> = args.1.into_iter().map(|t| {
-                nr_value(t, module_path, env)
-            }).collect();
             let mut inner = LocalEnv::new_scope(env);
-            let arg_names : Option<Vec<_>> = args.0.into_iter().map(|n| {
-                inner.new_var(&n, true)
+            let args : Fallible<Vec<_>> = args.into_iter().map(|(n, t)| {
+                let name = if let Some(name) = inner.new_var(&n, true) {
+                    name
+                } else {
+                    err(line, format!("Duplicate argument name {}", n))?
+                };
+                let type_ = nr_value(t, module_path, &mut inner)?;
+                Ok((name, type_))
             }).collect();
-
-            let args: Vec<_> = if let Some(arg_names) = arg_names {
-                arg_names.into_iter().zip(arg_types?).collect()
-            } else {
-                err(line, "Argument names are not unique".into())?
-            };
 
             let body = nr_block(body, module_path, inner)?;
-            let new_return_type = nr_value(*return_type, module_path, env)?;
-            Ok(Value::Lambda { line, args, return_type: Box::new(new_return_type), body })
+            let return_type = nr_value(*return_type, module_path, env)?;
+            Ok(Value::Lambda { line, args: args?, return_type: Box::new(return_type), body })
         }
     }
 }
