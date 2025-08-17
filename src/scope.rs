@@ -111,7 +111,7 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<parser::Statement>> {
+fn nr_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<parser::Statement>> {
     use parser::Statement::*;
 
     let mut result = vec![];
@@ -119,27 +119,27 @@ fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: L
     for stm in stms {
         match stm {
             Value { line, value } => {
-                result.push(Value { line, value: resolve_value(value, module_path, &mut env)? });
+                result.push(Value { line, value: nr_value(value, module_path, &mut env)? });
             }
             Assignment { line, name, value } => {
-                let value = resolve_value(value, module_path, &mut env)?;
+                let value = nr_value(value, module_path, &mut env)?;
                 env.new_var(&name, false);
                 let name = env.var_name(module_path, &name).unwrap();
                 result.push(Assignment { line, name, value })
             }
             If { line, cond, then, otherwise } => {
-                let cond = resolve_value(cond, module_path, &mut env)?;
-                let then = resolve_block(then, module_path, LocalEnv::new_scope(&mut env))?;
-                let otherwise = resolve_block(otherwise, module_path, LocalEnv::new_scope(&mut env))?;
+                let cond = nr_value(cond, module_path, &mut env)?;
+                let then = nr_block(then, module_path, LocalEnv::new_scope(&mut env))?;
+                let otherwise = nr_block(otherwise, module_path, LocalEnv::new_scope(&mut env))?;
                 result.push(If { line, cond, then, otherwise });
             }
             While { line, cond, body } => {
-                let cond = resolve_value(cond, module_path, &mut env)?;
-                let body = resolve_block(body, module_path, LocalEnv::new_scope(&mut env))?;
+                let cond = nr_value(cond, module_path, &mut env)?;
+                let body = nr_block(body, module_path, LocalEnv::new_scope(&mut env))?;
                 result.push(While { line, cond, body });
             }
             For { line, key, value, expr, body } => {
-                let expr = resolve_value(expr, module_path, &mut env)?;
+                let expr = nr_value(expr, module_path, &mut env)?;
                 let mut inner = LocalEnv::new_scope(&mut env);
                 let key = key.map(|key| inner.new_var(&key, true).unwrap());
                 let value = if let Some(value) = inner.new_var(&value, true) {
@@ -147,11 +147,11 @@ fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: L
                 } else {
                     err(line, format!("Both variables in the for loop have the name {}", value))?
                 };
-                let body = resolve_block(body, module_path, inner)?;
+                let body = nr_block(body, module_path, inner)?;
                 result.push(For { line, key, value, expr, body });
             }
             Return { line, value } => {
-                let value = resolve_value(value, module_path, &mut env)?;
+                let value = nr_value(value, module_path, &mut env)?;
                 result.push(Return { line, value });
             }
         }
@@ -160,7 +160,7 @@ fn resolve_block<'a>(stms: Vec<parser::Statement>, module_path: &str, mut env: L
     Ok(result)
 }
 
-fn resolve_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) -> Fallible<parser::Value> {
+fn nr_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEnv) -> Fallible<parser::Value> {
     use parser::Value::*;
 
     match val {
@@ -184,26 +184,26 @@ fn resolve_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEn
             }
         }
         BinOp { line, name, lhs, rhs } => {
-            let new_lhs = resolve_value(*lhs, module_path, env)?;
-            let new_rhs = resolve_value(*rhs, module_path, env)?;
+            let new_lhs = nr_value(*lhs, module_path, env)?;
+            let new_rhs = nr_value(*rhs, module_path, env)?;
             Ok(BinOp { line, name, lhs: Box::new(new_lhs), rhs: Box::new(new_rhs) })
         }
         Access { line, object, field } => {
-            let new_object = resolve_value(*object, module_path, env)?;
+            let new_object = nr_value(*object, module_path, env)?;
             Ok(Access { line, object: Box::new(new_object), field })
         }
         Call { line, func, args } => {
-            let new_func = resolve_value(*func, module_path, env)?;
+            let new_func = nr_value(*func, module_path, env)?;
             let mut new_args = vec![];
             for arg in args {
-                new_args.push(resolve_value(arg, module_path, env)?);
+                new_args.push(nr_value(arg, module_path, env)?);
             }
             Ok(Call { line, func: Box::new(new_func), args: new_args })
         }
         Record { line, fields } => {
             let mut new_fields = HashMap::new();
             for (key, value) in fields {
-                new_fields.insert(key, resolve_value(value, module_path, env)?);
+                new_fields.insert(key, nr_value(value, module_path, env)?);
             }
             Ok(Record { line, fields: new_fields })
         }
@@ -218,13 +218,13 @@ fn resolve_value<'a>(val: parser::Value, module_path: &str, env: &'a mut LocalEn
                 }
             }
 
-            let new_body = resolve_block(body, module_path, inner)?;
+            let new_body = nr_block(body, module_path, inner)?;
             Ok(Lambda { line, args: new_args, return_type, body: new_body })
         }
     }
 }
 
-pub fn resolve(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, parser::Value>)> {
+pub fn name_resolution(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, parser::Value>)> {
     let mut global_env = GlobalEnv::new(&modules)?;
     let mut result = HashMap::new();
     let mut main_name = None;
@@ -234,7 +234,7 @@ pub fn resolve(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fal
         for decl in decls {
             if let parser::Decl::Const { name, value, .. } = decl {
                 let new_name = module_env.var_name(&module_path, &name).unwrap();
-                let new_value = resolve_value(value, &module_path, &mut module_env)?;
+                let new_value = nr_value(value, &module_path, &mut module_env)?;
 
                 if module_path == main && name == "main" {
                     main_name = Some(new_name.clone());

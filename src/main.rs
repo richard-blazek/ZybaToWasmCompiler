@@ -4,7 +4,7 @@ mod error;
 mod lexer;
 mod parser;
 mod filesystem;
-mod name_resolution;
+mod scope;
 mod loader;
 
 fn main() {
@@ -104,7 +104,7 @@ fn main() {
         println!("Content: {:?}", decls);
     }
 
-    let (main_fn, decls) = match name_resolution::resolve(main_path, files) {
+    let (main_fn, decls) = match scope::name_resolution(main_path, files) {
         Ok((main_fn, decls)) => {
             (main_fn, decls)
         }
