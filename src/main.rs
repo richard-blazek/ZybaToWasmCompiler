@@ -27,6 +27,9 @@ fn main() {
         return radius * radius * math::pi;
     };
 
+    int = 0;
+    print = fun[x: int] () {};
+
     isPrime = fun[n: int] bool {
         prime = true;
         if n < 2 {

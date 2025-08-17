@@ -23,7 +23,7 @@ impl GlobalEnv {
         for (module_path, decls) in files {
             for decl in decls {
                 if let parser::Decl::Const { name, private: false, .. } = decl {
-                    let uniq = format!("_global{}_{}", i, name);
+                    let uniq = format!("_m{}_{}", i, name);
                     consts.insert((module_path.clone(), name.clone()), uniq);
                 } else if let parser::Decl::Import { path, .. } = decl {
                     let ns = path.split('/').last().unwrap().replace(".zyba", "");
@@ -62,7 +62,7 @@ impl<'a> LocalEnv<'a> {
         if self.locals.contains_key(&name) {
             None
         } else {
-            let uniq = format!("_local{}", self.inc_counter());
+            let uniq = format!("_v{}", self.inc_counter());
             self.locals.insert(name, uniq.clone());
             Some(uniq)
         }
