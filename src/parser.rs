@@ -6,7 +6,7 @@ use crate::lexer::{Token, tokenize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Int { line: i64, value: u64 },
+    Int { line: i64, value: i64 },
     Real { line: i64, value: f64 },
     Text { line: i64, value: String },
     Bool { line: i64, value: bool },
