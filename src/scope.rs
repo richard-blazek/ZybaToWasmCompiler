@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::builtin::is_builtin_global;
+use crate::builtin::{is_builtin_type, is_builtin_function};
 use crate::error::{err, Fallible};
 use crate::parser;
 
@@ -81,7 +81,7 @@ impl Environment for GlobalEnv {
     fn var_name(&self, module_path: &str, name: &str) -> Option<String> {
         if let Some(name) = self.consts.get(&(module_path.to_string(), name.to_string())) {
             Some(name.clone())
-        } else if is_builtin_global(name) {
+        } else if is_builtin_function(name) {
             Some(name.to_string())
         } else {
             None
@@ -205,8 +205,8 @@ fn nr_type(val: parser::Value) -> Fallible<Type> {
     use parser::Value::*;
 
     match val {
-        Var { line, ns, name } => {
-            if is_builtin_global(&name) {
+        Var { line, name, .. } => {
+            if is_builtin_type(&name) {
                 Ok(Type::Scalar { line, name })
             } else {
                 err(line, format!("Undefined type {}", name))

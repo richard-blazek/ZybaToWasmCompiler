@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -14,17 +15,27 @@ pub enum Type {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Builtin {
-    Add, Sub, Mul, Div, Rem, And, Or, Xor,
-    Eq, Neq, Lt, Gt, Le, Ge, Pow, Not,
-    Int, Real, Bool, Text, Dict, List,
-    Set, Get, Has, Len, Concat,
+    Add, Sub, Mul, Div, Rem, And, Or, Xor, Not, Eq, Neq, Lt, Gt, Le, Ge,
+    Int, Real, Bool, Text, Dict, List, Set, Get, Has, Len, Concat,
     Insert, Erase, Append
 }
 
-static BUILTIN_GLOBALS: [&str; 7] = [
-    "Int", "Real", "Text", "Bool", "List", "Dict", "Func"
-];
+static CONSTRUCTORS : LazyLock<HashSet<&str>> = LazyLock::new(||
+    HashSet::from_iter(["Int", "Real", "Text", "Bool", "List", "Dict"])
+);
 
-pub fn is_builtin_global(name: &str) -> bool {
-    BUILTIN_GLOBALS.iter().any(|g| *g == name)
+static TYPES : LazyLock<HashSet<&str>> = LazyLock::new(||
+    CONSTRUCTORS.clone().into_iter().chain(["Func"]).collect()
+);
+
+static FUNCTIONS : LazyLock<HashSet<&str>> = LazyLock::new(||
+    CONSTRUCTORS.clone().into_iter().chain(["print"]).collect()
+);
+
+pub fn is_builtin_type(name: &str) -> bool {
+    TYPES.contains(name)
+}
+
+pub fn is_builtin_function(name: &str) -> bool {
+    FUNCTIONS.contains(name)
 }
