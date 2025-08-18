@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::builtin::is_builtin_operator;
 use crate::error::{err, Fallible};
 use crate::lexer::{Token, tokenize};
 
@@ -178,6 +179,9 @@ fn parse_value(tokens: &[Token], i: usize) -> Fallible<(usize, Value)> {
     loop {
         match &tokens[i] {
             Token::Operator { line, name } => {
+                if !is_builtin_operator(name) {
+                    err(*line, format!("There is no operator {}", name))?;
+                }
                 let (new_i, rhs) = parse_operand(tokens, i + 1)?;
                 i = new_i;
                 value = Value::BinOp {

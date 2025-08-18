@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Real,
@@ -13,29 +13,70 @@ pub enum Type {
     Record { fields: HashMap<String, Type> },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Builtin {
-    Add, Sub, Mul, Div, Rem, And, Or, Xor, Not, Eq, Neq, Lt, Gt, Le, Ge,
-    Int, Real, Bool, Text, Dict, List, Set, Get, Has, Len, Concat,
-    Insert, Erase, Append
-}
-
-static CONSTRUCTORS : LazyLock<HashSet<&str>> = LazyLock::new(||
-    HashSet::from_iter(["Int", "Real", "Text", "Bool", "List", "Dict"])
-);
-
-static TYPES : LazyLock<HashSet<&str>> = LazyLock::new(||
-    CONSTRUCTORS.clone().into_iter().chain(["Func"]).collect()
-);
-
-static FUNCTIONS : LazyLock<HashSet<&str>> = LazyLock::new(||
-    CONSTRUCTORS.clone().into_iter().chain(["print"]).collect()
-);
-
 pub fn is_builtin_type(name: &str) -> bool {
-    TYPES.contains(name)
+    ["Int", "Real", "Text", "Bool", "List", "Dict", "Func"].contains(&name)
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Builtin {
+    Mul, Div, Rem, And, Or, Xor, Add, Sub, Eq, Neq, Lt, Gt, Lte, Gte,
+    LogicAnd, LogicOr, Int, Real, Bool, Text, Dict, List, Not, Print,
+    Set, Get, Has, Len, Insert, Erase, Append
+}
+
+static FUNCTIONS : LazyLock<HashMap<&str, Builtin>> = LazyLock::new(||
+    HashMap::from([
+        ("Int", Builtin::Int),
+        ("Real", Builtin::Real),
+        ("Text", Builtin::Text),
+        ("Bool", Builtin::Bool),
+        ("List", Builtin::List),
+        ("Dict", Builtin::Dict),
+        ("not", Builtin::Not),
+        ("print", Builtin::Print),
+        ("set", Builtin::Set),
+        ("get", Builtin::Get),
+        ("has", Builtin::Has),
+        ("len", Builtin::Len),
+        ("insert", Builtin::Insert),
+        ("erase", Builtin::Erase),
+        ("append", Builtin::Append)
+    ])
+);
 
 pub fn is_builtin_function(name: &str) -> bool {
-    FUNCTIONS.contains(name)
+    FUNCTIONS.contains_key(name)
+}
+
+static OPERATORS : LazyLock<Vec<HashMap<&str, Builtin>>> = LazyLock::new(||
+    vec![
+        HashMap::from([
+            ("*", Builtin::Mul),
+            ("/", Builtin::Div),
+            ("%", Builtin::Rem),
+            ("&", Builtin::And),
+            ("|", Builtin::Or),
+            ("^", Builtin::Xor)
+        ]),
+        HashMap::from([
+            ("+", Builtin::Add),
+            ("-", Builtin::Sub)
+        ]),
+        HashMap::from([
+            ("==", Builtin::Eq),
+            ("!=", Builtin::Neq),
+            ("<", Builtin::Lt),
+            ("<=", Builtin::Lte),
+            (">", Builtin::Gt),
+            (">=", Builtin::Gte),
+        ]),
+        HashMap::from([
+            ("&&", Builtin::LogicAnd),
+            ("||", Builtin::LogicOr)
+        ])
+    ]
+);
+
+pub fn is_builtin_operator(name: &str) -> bool {
+    OPERATORS.iter().any(|hash_map| hash_map.contains_key(name))
 }
