@@ -7,7 +7,7 @@ mod filesystem;
 mod scope;
 mod loader;
 mod builtin;
-mod semantics;
+mod typecheck;
 
 fn main() {
     let mut files = HashMap::new();
