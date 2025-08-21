@@ -21,7 +21,7 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Value { line: i64, value: Value },
-    Assignment { line: i64, name: String, value: Value },
+    Assign { line: i64, name: String, value: Value },
     If { line: i64, cond: Value, then: Vec<Statement>, otherwise: Vec<Statement> },
     While { line: i64, cond: Value, body: Vec<Statement> },
     For { line: i64, key: Option<String>, value: String, expr: Value, body: Vec<Statement> },
@@ -227,7 +227,7 @@ fn parse_statement(tokens: &[Token], i: usize) -> Fallible<(usize, Statement)> {
         (Token::Name { line, name }, Some(Token::Operator { name: op, .. })) if op == "=" => {
             let (i, value) = parse_value(tokens, i + 2)?;
             let i = expect(tokens, i, ';')?;
-            Ok((i, Statement::Assignment { line: *line, name: name.clone(), value }))
+            Ok((i, Statement::Assign { line: *line, name: name.clone(), value }))
         }
         (token, _) => {
             let (i, value) = parse_value(tokens, i)?;

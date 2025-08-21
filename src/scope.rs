@@ -28,7 +28,7 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Value { line: i64, value: Value },
-    Assignment { line: i64, name: String, value: Value },
+    Assign { line: i64, name: String, value: Value },
     If { line: i64, cond: Value, then: Vec<Statement>, otherwise: Vec<Statement> },
     While { line: i64, cond: Value, body: Vec<Statement> },
     For { line: i64, key: String, value: String, expr: Value, body: Vec<Statement> },
@@ -159,11 +159,11 @@ fn nr_block(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) 
             parser::Statement::Value { line, value } => {
                 result.push(Statement::Value { line, value: nr_value(value, module_path, &mut env)? });
             }
-            parser::Statement::Assignment { line, name, value } => {
+            parser::Statement::Assign { line, name, value } => {
                 let value = nr_value(value, module_path, &mut env)?;
                 env.new_var(&name, false);
                 let name = env.var_name(module_path, &name).unwrap();
-                result.push(Statement::Assignment { line, name, value })
+                result.push(Statement::Assign { line, name, value })
             }
             parser::Statement::If { line, cond, then, otherwise } => {
                 let cond = nr_value(cond, module_path, &mut env)?;
@@ -290,8 +290,7 @@ fn nr_value(val: parser::Value, module_path: &str, env: &mut LocalEnv) -> Fallib
                 } else {
                     err(line, format!("Duplicate argument name {}", n))?
                 };
-                let type_ = nr_type(t)?;
-                Ok((name, type_))
+                Ok((name, nr_type(t)?))
             }).collect();
 
             let body = nr_block(body, module_path, inner)?;
