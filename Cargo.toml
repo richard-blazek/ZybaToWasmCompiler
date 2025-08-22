@@ -3,8 +3,5 @@ name = "zybacompiler-2"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-num-bigint = "0.4.6"
-
 [dev-dependencies]
 proptest = "1.5"
