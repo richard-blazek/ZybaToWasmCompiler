@@ -47,7 +47,7 @@ impl Value {
     }
 }
 
-fn parse_type(tpe: &scope::Type) -> Fallible<Type> {
+fn check_type(tpe: &scope::Type) -> Fallible<Type> {
     use scope::Type::*;
     match tpe {
         Scalar { line, name } => {
@@ -58,7 +58,7 @@ fn parse_type(tpe: &scope::Type) -> Fallible<Type> {
             }
         },
         Generic { line, template, args } => {
-            let args = args.iter().map(parse_type).collect::<Fallible<Vec<_>>>()?;
+            let args = args.iter().map(check_type).collect::<Fallible<Vec<_>>>()?;
             if let Some(tpe) = get_generic_type(template, &args) {
                 Ok(tpe)
             } else {
@@ -68,7 +68,7 @@ fn parse_type(tpe: &scope::Type) -> Fallible<Type> {
         Record { fields, .. } => {
             let mut new_fields = HashMap::new();
             for (name, tpe) in fields {
-                new_fields.insert(name.clone(), parse_type(tpe)?);
+                new_fields.insert(name.clone(), check_type(tpe)?);
             }
             Ok(Type::Record { fields: new_fields })
         }
@@ -86,8 +86,8 @@ fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<Strin
             Text { .. } => env.insert(name.clone(), Type::Text),
             Bool { .. } => env.insert(name.clone(), Type::Bool),
             Lambda { args, return_type, .. } => {
-                let return_type = Box::new(parse_type(return_type)?);
-                let args = args.iter().map(|(_, t)| parse_type(t)).collect::<Fallible<Vec<_>>>()?;
+                let return_type = Box::new(check_type(return_type)?);
+                let args = args.iter().map(|(_, t)| check_type(t)).collect::<Fallible<Vec<_>>>()?;
                 env.insert(name.clone(), Type::Func { args, return_type })
             }
             _ => err(value.line(), "Globals can only be constant literals or functions".into())?
@@ -120,10 +120,30 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
                 Ok(Value::Init { line, name, value: Box::new(value), tpe })
             }
         }
-        Record { line, fields } => todo!(),
+        Record { line, fields } => {
+            let fields = fields.into_iter().map(|(name, value)| {
+                Ok((name, check_value(value, env)?))
+            }).collect::<Fallible<HashMap<_, _>>>()?;
+            let field_types = fields.iter().map(|(name, value)| {
+                (name.clone(), value.tpe())
+            }).collect::<HashMap<_, _>>();
+            let tpe = Type::Record { fields: field_types };
+            Ok(Value::Record { line, fields, tpe })
+        }
+        Access { line, object, field } => {
+            let object = check_value(*object, env)?;
+            if let Type::Record { fields } = object.tpe() {
+                if let Some(tpe) = fields.get(&field).cloned() {
+                    Ok(Value::Access { line, object: Box::new(object), field, tpe })
+                } else {
+                    err(line, format!("Object does not have a field {}", field))
+                }
+            } else {
+                err(line, format!("Cannot access a field {}, value is not a record", field))
+            }
+        }
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
-        Access { line, object, field } => todo!(),
         Lambda { line, args, return_type, body } => todo!(),
         If { line, cond, then, otherwise } => todo!(),
         While { line, cond, body } => todo!(),
