@@ -79,8 +79,11 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
         Real { line, value } => Ok(Value::Real { line, value, tpe: Type::Real }),
         Text { line, value } => Ok(Value::Text { line, value, tpe: Type::Text }),
         Bool { line, value } => Ok(Value::Bool { line, value, tpe: Type::Bool }),
+        Var { line, name } => {
+            let tpe = env.get(&name).unwrap().clone();
+            Ok(Value::Var { line, name, tpe })
+        }
         Record { line, fields } => todo!(),
-        Var { line, name } => todo!(),
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
         Access { line, object, field } => todo!(),
