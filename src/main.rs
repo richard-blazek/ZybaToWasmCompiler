@@ -30,8 +30,6 @@ fn main() {
         radius * radius * math::pi
     };
 
-    print = fun[x: Int] () {};
-
     isPrime = fun[n: Int] Bool {
         prime = true;
         if n < 2 {
