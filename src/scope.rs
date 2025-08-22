@@ -22,17 +22,24 @@ pub enum Value {
     Call { line: i64, func: Box<Value>, args: Vec<Value> },
     BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
-    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Statement> }
+    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value> },
+    Assign { line: i64, name: String, value: Box<Value> },
+    If { line: i64, cond: Box<Value>, then: Vec<Value>, otherwise: Vec<Value> },
+    While { line: i64, cond: Box<Value>, body: Vec<Value> },
+    For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value> },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Statement {
-    Value { line: i64, value: Value },
-    Assign { line: i64, name: String, value: Value },
-    If { line: i64, cond: Value, then: Vec<Statement>, otherwise: Vec<Statement> },
-    While { line: i64, cond: Value, body: Vec<Statement> },
-    For { line: i64, key: String, value: String, expr: Value, body: Vec<Statement> },
-    Return { line: i64, value: Value }
+impl Value {
+    pub fn line(&self) -> i64 {
+        use Value::*;
+        match self {
+            Int { line, .. } | Real { line, .. } | Text { line, .. }
+            | Bool { line, .. } | Record { line, .. } | Var { line, .. }
+            | Call { line, .. } | BinOp { line, .. } | Access { line, .. }
+            | Lambda { line, .. } | Assign { line, .. } | If { line, .. }
+            | While { line, .. } | For { line, .. } => *line
+        }
+    }
 }
 
 trait Environment {
@@ -151,60 +158,10 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn nr_block(stms: Vec<parser::Statement>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Statement>> {
-    let mut result = vec![];
+fn nr_type(e: parser::Expr) -> Fallible<Type> {
+    use parser::Expr::*;
 
-    for stm in stms {
-        match stm {
-            parser::Statement::Value { line, value } => {
-                result.push(Statement::Value { line, value: nr_value(value, module_path, &mut env)? });
-            }
-            parser::Statement::Assign { line, name, value } => {
-                let value = nr_value(value, module_path, &mut env)?;
-                env.new_var(&name, false);
-                let name = env.var_name(module_path, &name).unwrap();
-                result.push(Statement::Assign { line, name, value })
-            }
-            parser::Statement::If { line, cond, then, otherwise } => {
-                let cond = nr_value(cond, module_path, &mut env)?;
-                let then = nr_block(then, module_path, LocalEnv::new_scope(&mut env))?;
-                let otherwise = nr_block(otherwise, module_path, LocalEnv::new_scope(&mut env))?;
-                result.push(Statement::If { line, cond, then, otherwise });
-            }
-            parser::Statement::While { line, cond, body } => {
-                let cond = nr_value(cond, module_path, &mut env)?;
-                let body = nr_block(body, module_path, LocalEnv::new_scope(&mut env))?;
-                result.push(Statement::While { line, cond, body });
-            }
-            parser::Statement::For { line, key, value, expr, body } => {
-                let expr = nr_value(expr, module_path, &mut env)?;
-                let mut inner = LocalEnv::new_scope(&mut env);
-                let key = if let Some(key) = key {
-                    inner.new_var(&key, true).unwrap()
-                } else {
-                    inner.new_unique_id()
-                };
-                let value = if let Some(value) = inner.new_var(&value, true) {
-                    value
-                } else {
-                    err(line, format!("Both variables in the for loop have the name {}", value))?
-                };
-                let body = nr_block(body, module_path, inner)?;
-                result.push(Statement::For { line, key, value, expr, body });
-            }
-            parser::Statement::Return { line, value } => {
-                let value = nr_value(value, module_path, &mut env)?;
-                result.push(Statement::Return { line, value });
-            }
-        }
-    }
-    Ok(result)
-}
-
-fn nr_type(val: parser::Value) -> Fallible<Type> {
-    use parser::Value::*;
-
-    match val {
+    match e {
         Var { line, name, .. } => {
             if is_builtin_type(&name) {
                 Ok(Type::Scalar { line, name })
@@ -227,30 +184,24 @@ fn nr_type(val: parser::Value) -> Fallible<Type> {
             }
             Ok(Type::Record { line, fields: new_fields })
         }
-        Int { line, value } => err(line, format!("Expected a type, but got an integer {}", value)),
-        Real { line, value } => err(line, format!("Expected a type, but got a number {}", value)),
-        Text { line, value } => err(line, format!("Expected a type, but got a text {}", value)),
-        Bool { line, value } => err(line, format!("Expected a type, but got a boolean {}", value)),
-        BinOp { line, name, .. } => err(line, format!("Invalid operation {}, expected a type", name)),
-        Lambda { line, .. } => err(line, "Expected a type, but got a function".into()),
-        Access { line, field, .. } => err(line, format!("Invalid operation for a type: .{}", field)),
+        _ => err(e.line(), "Not a valid type expression".into())
     }
 }
 
-fn nr_value(val: parser::Value, module_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
-    match val {
-        parser::Value::Int { line, value } => Ok(Value::Int { line, value }),
-        parser::Value::Real { line, value } => Ok(Value::Real { line, value }),
-        parser::Value::Text { line, value } => Ok(Value::Text { line, value }),
-        parser::Value::Bool { line, value } => Ok(Value::Bool { line, value }),
-        parser::Value::Var { line, ns: None, name } => {
+fn nr_expr(e: parser::Expr, module_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
+    match e {
+        parser::Expr::Int { line, value } => Ok(Value::Int { line, value }),
+        parser::Expr::Real { line, value } => Ok(Value::Real { line, value }),
+        parser::Expr::Text { line, value } => Ok(Value::Text { line, value }),
+        parser::Expr::Bool { line, value } => Ok(Value::Bool { line, value }),
+        parser::Expr::Var { line, ns: None, name } => {
             if let Some(name) = env.var_name(module_path, &name) {
                 Ok(Value::Var { line, name })
             } else {
                 err(line, format!("Undefined identifier '{}'", name))
             }
         }
-        parser::Value::Var { line, ns: Some(ns_name), name } => {
+        parser::Expr::Var { line, ns: Some(ns_name), name } => {
             if let Some(ns_path) = env.ns_path(module_path, &ns_name) {
                 if let Some(name) = env.var_name(&ns_path, &name) {
                     Ok(Value::Var { line, name })
@@ -261,31 +212,31 @@ fn nr_value(val: parser::Value, module_path: &str, env: &mut LocalEnv) -> Fallib
                 err(line, format!("Unknown module '{}'", ns_name))
             }
         }
-        parser::Value::BinOp { line, name, lhs, rhs } => {
-            let new_lhs = nr_value(*lhs, module_path, env)?;
-            let new_rhs = nr_value(*rhs, module_path, env)?;
+        parser::Expr::BinOp { line, name, lhs, rhs } => {
+            let new_lhs = nr_expr(*lhs, module_path, env)?;
+            let new_rhs = nr_expr(*rhs, module_path, env)?;
             Ok(Value::BinOp { line, name, lhs: Box::new(new_lhs), rhs: Box::new(new_rhs) })
         }
-        parser::Value::Access { line, object, field } => {
-            let new_object = nr_value(*object, module_path, env)?;
+        parser::Expr::Access { line, object, field } => {
+            let new_object = nr_expr(*object, module_path, env)?;
             Ok(Value::Access { line, object: Box::new(new_object), field })
         }
-        parser::Value::Call { line, func, args } => {
-            let new_func = nr_value(*func, module_path, env)?;
+        parser::Expr::Call { line, func, args } => {
+            let new_func = nr_expr(*func, module_path, env)?;
             let mut new_args = vec![];
             for arg in args {
-                new_args.push(nr_value(arg, module_path, env)?);
+                new_args.push(nr_expr(arg, module_path, env)?);
             }
             Ok(Value::Call { line, func: Box::new(new_func), args: new_args })
         }
-        parser::Value::Record { line, fields } => {
+        parser::Expr::Record { line, fields } => {
             let mut new_fields = HashMap::new();
             for (key, value) in fields {
-                new_fields.insert(key, nr_value(value, module_path, env)?);
+                new_fields.insert(key, nr_expr(value, module_path, env)?);
             }
             Ok(Value::Record { line, fields: new_fields })
         }
-        parser::Value::Lambda { line, args, return_type, body } => {
+        parser::Expr::Lambda { line, args, return_type, body } => {
             let mut inner = LocalEnv::new_scope(env);
             let args : Fallible<Vec<_>> = args.into_iter().map(|(n, t)| {
                 let name = if let Some(name) = inner.new_var(&n, true) {
@@ -296,11 +247,52 @@ fn nr_value(val: parser::Value, module_path: &str, env: &mut LocalEnv) -> Fallib
                 Ok((name, nr_type(t)?))
             }).collect();
 
-            let body = nr_block(body, module_path, inner)?;
+            let body = nr_exprs(body, module_path, inner)?;
             let return_type = nr_type(*return_type)?;
             Ok(Value::Lambda { line, args: args?, return_type, body })
         }
+        parser::Expr::Assign { line, name, expr: value } => {
+            let value = nr_expr(*value, module_path, env)?;
+            env.new_var(&name, false);
+            let name = env.var_name(module_path, &name).unwrap();
+            Ok(Value::Assign { line, name, value: Box::new(value) })
+        }
+        parser::Expr::If { line, cond, then, otherwise } => {
+            let cond = nr_expr(*cond, module_path, &mut LocalEnv::new_scope(env))?;
+            let then = nr_exprs(then, module_path, LocalEnv::new_scope(env))?;
+            let otherwise = nr_exprs(otherwise, module_path, LocalEnv::new_scope(env))?;
+            Ok(Value::If { line, cond: Box::new(cond), then, otherwise })
+        }
+        parser::Expr::While { line, cond, body } => {
+            let cond = nr_expr(*cond, module_path, &mut LocalEnv::new_scope(env))?;
+            let body = nr_exprs(body, module_path, LocalEnv::new_scope(env))?;
+            Ok(Value::While { line, cond: Box::new(cond), body })
+        }
+        parser::Expr::For { line, key, value, expr, body } => {
+            let expr = nr_expr(*expr, module_path, &mut LocalEnv::new_scope(env))?;
+            let mut inner = LocalEnv::new_scope(env);
+            let key = if let Some(key) = key {
+                inner.new_var(&key, true).unwrap()
+            } else {
+                inner.new_unique_id()
+            };
+            let value = if let Some(value) = inner.new_var(&value, true) {
+                value
+            } else {
+                err(line, format!("Both variables in the for loop have the name {}", value))?
+            };
+            let body = nr_exprs(body, module_path, inner)?;
+            Ok(Value::For { line, key, value, expr: Box::new(expr), body })
+        }
     }
+}
+
+fn nr_exprs(exprs: Vec<parser::Expr>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Value>> {
+    let mut result = vec![];
+    for expr in exprs {
+        result.push(nr_expr(expr, module_path, &mut env)?);
+    }
+    Ok(result)
 }
 
 pub fn name_resolution(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, Value>)> {
@@ -311,9 +303,9 @@ pub fn name_resolution(main: String, modules: HashMap<String, Vec<parser::Decl>>
     for (module_path, decls) in modules {
         let mut module_env = LocalEnv::new_module(&mut global_env, &module_path, &decls)?;
         for decl in decls {
-            if let parser::Decl::Const { name, value, .. } = decl {
+            if let parser::Decl::Const { name, expr, .. } = decl {
                 let new_name = module_env.var_name(&module_path, &name).unwrap();
-                let new_value = nr_value(value, &module_path, &mut module_env)?;
+                let new_value = nr_expr(expr, &module_path, &mut module_env)?;
 
                 if module_path == main && name == "main" {
                     main_name = Some(new_name.clone());

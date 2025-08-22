@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::error::err;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,

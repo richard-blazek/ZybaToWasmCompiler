@@ -72,11 +72,7 @@ fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<Strin
                 let args = args.iter().map(|(_, t)| parse_type(t)).collect::<Fallible<Vec<_>>>()?;
                 env.insert(name.clone(), Type::Func { args, return_type })
             }
-            Record { line, .. } => err(*line, "Globals can be only constants or functions, not a record".into())?,
-            Var { line, .. } => err(*line, "Globals can be only constants or functions, not a variable".into())?,
-            Call { line, .. } => err(*line, "Globals can be only constants or functions, not a function call".into())?,
-            BinOp { line, .. } => err(*line, "Globals can be only constants or functions, not an expression".into())?,
-            Access { line, .. } => err(*line, "Globals can be only constants or functions, not an expression".into())?,
+            _ => err(value.line(), "Globals can only be constant literals or functions".into())?
         };
     }
     Ok(env)
@@ -85,16 +81,20 @@ fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<Strin
 fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     use scope::Value::*;
     match value {
-        Int { line, value } => todo!(),
-        Real { line, value } => todo!(),
-        Text { line, value } => todo!(),
-        Bool { line, value } => todo!(),
+        Int { line, value } => Ok(Value::Int { line, value, tpe: Type::Int }),
+        Real { line, value } => Ok(Value::Real { line, value, tpe: Type::Real }),
+        Text { line, value } => Ok(Value::Text { line, value, tpe: Type::Text }),
+        Bool { line, value } => Ok(Value::Bool { line, value, tpe: Type::Bool }),
         Record { line, fields } => todo!(),
         Var { line, name } => todo!(),
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
         Access { line, object, field } => todo!(),
         Lambda { line, args, return_type, body } => todo!(),
+        Assign { line, name, value } => todo!(),
+        If { line, cond, then, otherwise } => todo!(),
+        While { line, cond, body } => todo!(),
+        For { line, key, value, expr, body } => todo!(),
     }
 }
 

@@ -17,7 +17,7 @@ fn main() {
         for i : n {
             result = result * i;
         }
-        return result;
+        result
     };
     
     pi = 3.142;
@@ -27,7 +27,7 @@ fn main() {
     import \"math.zyba\";
 
     private circleArea = fun[radius: Real] Real {
-        return radius * radius * math::pi;
+        radius * radius * math::pi
     };
 
     print = fun[x: Int] () {};
@@ -43,7 +43,7 @@ fn main() {
                 i = i + 1;
             }
         }
-        return prime;
+        prime
     };
 
     sum = fun[n: List[Int]] Int {
@@ -51,7 +51,7 @@ fn main() {
         for index, value : n {
             total = total + value;
         }
-        return total;
+        total
     };
 
     range = fun[n: Int] List[Int] {
@@ -61,7 +61,7 @@ fn main() {
             result.append[i + 1];
             i = i + 1;
         }
-        return result;
+        result
     };
 
     private concat = fun[LoL: List[List[Int]]] List[Int] {
@@ -69,7 +69,7 @@ fn main() {
         for item : LoL {
             result.append[item];
         }
-        return result;
+        result
     };
 
     merge = fun[a: List[Int], b: List[Int]] List[Int] {
@@ -79,7 +79,7 @@ fn main() {
             result.append[a.get[i], b.get[i]];
             i = i + 1;
         }
-        return result;
+        result
     };
     
     main = fun[] () {
@@ -117,4 +117,9 @@ fn main() {
         println!("Declaration: {}", name);
         println!("Value: {:?}", value);
     }
+
+    match typecheck::check(decls) {
+        Ok(_) => println!("Ok"),
+        Err(e) => println!("Error: {:?}", e)
+    };
 }
