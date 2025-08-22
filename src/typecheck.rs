@@ -184,7 +184,29 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
             let tpe = Type::Record { fields: HashMap::new() };
             Ok(Value::For { line, key, value, expr, body, tpe })
         }
-        Lambda { line, args, return_type, body } => todo!(),
+        Lambda { line, args, return_type, body } => {
+            let args = args.into_iter().map(|(name, tpe)| {
+                Ok((name, check_type(&tpe)?))
+            }).collect::<Fallible<Vec<(String, Type)>>>()?;
+            env.extend(args.clone());
+
+            let return_type = check_type(&return_type)?;
+            let tpe = Type::Func {
+                args: args.iter().map(|(_, t)| t.clone()).collect(),
+                return_type: Box::new(return_type.clone())
+            };
+            let body = body.into_iter().map(|v| {
+                check_value(v, env)
+            }).collect::<Fallible<Vec<_>>>()?;
+            let void = Type::Record { fields: HashMap::new() };
+            let body_t = body.last().map(Value::tpe).unwrap_or(void.clone());
+
+            if return_type == body_t || return_type == void {
+                Ok(Value::Lambda { line, args, return_type, body, tpe })
+            } else {
+                err(line, format!("Return type is {:?}, but the function actually returns {:?}", return_type, body_t))
+            }
+        }
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
     }
