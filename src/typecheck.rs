@@ -54,7 +54,7 @@ fn check_type(tpe: &scope::Type) -> Fallible<Type> {
             if let Some(tpe) = get_scalar_type(name) {
                 Ok(tpe)
             } else {
-                err(*line, format!("Type {} is not valid", name))
+                err(*line, format!("Type {} does not exist", name))
             }
         },
         Generic { line, template, args } => {
@@ -62,7 +62,7 @@ fn check_type(tpe: &scope::Type) -> Fallible<Type> {
             if let Some(tpe) = get_generic_type(template, &args) {
                 Ok(tpe)
             } else {
-                err(*line, format!("Invalid type {} with {} arguments", template, args.len()))
+                err(*line, format!("Invalid generic type {}", template))
             }
         }
         Record { fields, .. } => {
@@ -87,140 +87,195 @@ fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<Strin
             Bool { .. } => env.insert(name.clone(), Type::Bool),
             Lambda { args, return_type, .. } => {
                 let return_type = Box::new(check_type(return_type)?);
-                let args = args.iter().map(|(_, t)| check_type(t)).collect::<Fallible<Vec<_>>>()?;
+                let args = args.iter().map(|(_, t)| {
+                    check_type(t)
+                }).collect::<Fallible<Vec<_>>>()?;
                 env.insert(name.clone(), Type::Func { args, return_type })
             }
-            _ => err(value.line(), "Globals can only be constant literals or functions".into())?
+            v => err(v.line(), "Global must be a literal or function".into())?
         };
     }
     Ok(env)
 }
 
+fn check_int(line: i64, value: i64) -> Fallible<Value> {
+    Ok(Value::Int { line, value, tpe: Type::Int })
+}
+
+fn check_real(line: i64, value: f64) -> Fallible<Value> {
+    Ok(Value::Real { line, value, tpe: Type::Real })
+}
+
+fn check_text(line: i64, value: String) -> Fallible<Value> {
+    Ok(Value::Text { line, value, tpe: Type::Text })
+}
+
+fn check_bool(line: i64, value: bool) -> Fallible<Value> {
+    Ok(Value::Bool { line, value, tpe: Type::Bool })
+}
+
+fn check_var(line: i64, name: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let var_type = env.get(&name).unwrap().clone();
+    Ok(Value::Var { line, name, tpe: var_type })
+}
+
+fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let value = Box::new(check_value(value, env)?);
+    let value_tpe = value.tpe();
+    if let Some(var_tpe) = env.insert(name.clone(), value_tpe.clone()) {
+        if var_tpe != value_tpe {
+            err(line, format!("Assigning {:?}' to {:?}", value_tpe, var_tpe))?
+        }
+        Ok(Value::Assign { line, name, value, tpe: var_tpe })
+    } else {
+        Ok(Value::Init { line, name, value, tpe: value_tpe })
+    }
+}
+
+fn check_record(line: i64, fields: HashMap<String, scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let fields = fields.into_iter().map(|(name, value)| {
+        Ok((name, check_value(value, env)?))
+    }).collect::<Fallible<HashMap<_, _>>>()?;
+    let record_tpe = Type::Record {
+        fields: fields.iter().map(|(name, value)| {
+            (name.clone(), value.tpe())
+        }).collect()
+    };
+    Ok(Value::Record { line, fields, tpe: record_tpe })
+}
+
+fn check_access(line: i64, object: scope::Value, field: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let object = Box::new(check_value(object, env)?);
+    if let Type::Record { fields } = object.tpe() {
+        if let Some(field_tpe) = fields.get(&field) {
+            Ok(Value::Access { line, object, field, tpe: field_tpe.clone() })
+        } else {
+            err(line, format!("Record does not have a field {}", field))
+        }
+    } else {
+        err(line, format!("{:?} is not a record", object.tpe()))
+    }
+}
+
+fn check_if(line: i64, cond: scope::Value, then: Vec<scope::Value>, elsë: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let cond = Box::new(check_value(cond, env)?);
+    let then = then.into_iter().map(|v| {
+        check_value(v, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+    let elsë = elsë.into_iter().map(|v| {
+        check_value(v, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+    let then_t = then.last().map(Value::tpe);
+    let elsë_t = elsë.last().map(Value::tpe);
+    let tpe = if then_t.is_some() && then_t == elsë_t {
+        then_t.unwrap()
+    } else {
+        Type::Record { fields: HashMap::new() }
+    };
+    Ok(Value::If { line, cond, then, elsë, tpe })
+}
+
+fn check_while(line: i64, cond: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let cond = Box::new(check_value(cond, env)?);
+    let body = body.into_iter().map(|v| {
+        check_value(v, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+    let tpe = Type::Record { fields: HashMap::new() };
+    Ok(Value::While { line, cond, body, tpe })
+}
+
+fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let expr = Box::new(check_value(expr, env)?);
+    if let Type::List { item } = expr.tpe() {
+        env.insert(key.clone(), Type::Int);
+        env.insert(value.clone(), *item);
+    } else if let Type::Dict { key: kt, value: vt } = expr.tpe() {
+        env.insert(key.clone(), *kt);
+        env.insert(value.clone(), *vt);
+    } else {
+        err(line, "Expected a List or Dict in the for loop".into())?;
+    }
+    let body = body.into_iter().map(|v| {
+        check_value(v, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+    let tpe = Type::Record { fields: HashMap::new() };
+    Ok(Value::For { line, key, value, expr, body, tpe })
+}
+
+fn check_lambda(line: i64, args: Vec<(String, scope::Type)>, return_type: scope::Type, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let args = args.into_iter().map(|(name, tpe)| {
+        Ok((name, check_type(&tpe)?))
+    }).collect::<Fallible<Vec<(String, Type)>>>()?;
+    env.extend(args.clone());
+
+    let return_type = check_type(&return_type)?;
+    let tpe = Type::Func {
+        args: args.iter().map(|(_, t)| t.clone()).collect(),
+        return_type: Box::new(return_type.clone())
+    };
+    let body = body.into_iter().map(|v| {
+        check_value(v, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+    let void = Type::Record { fields: HashMap::new() };
+    let body_t = body.last().map(Value::tpe).unwrap_or(void.clone());
+
+    if return_type == body_t || return_type == void {
+        Ok(Value::Lambda { line, args, return_type, body, tpe })
+    } else {
+        err(line, format!("Return type is {:?}, but the function actually returns {:?}", return_type, body_t))
+    }
+}
+
+fn check_call(line: i64, func: scope::Value, args: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let func = Box::new(check_value(func, env)?);
+    if let Type::Func { args: expected, return_type } = func.tpe() {
+        if args.len() != expected.len() {
+            err(line, format!("Expected {} arguments but got {}", expected.len(), args.len()))?;
+        }
+        let args = args.into_iter().zip(expected).map(|(v, e_t)| {
+            let v = check_value(v, env)?;
+            if v.tpe() != e_t {
+                err(line, format!("Expected {:?} but got {:?}", e_t, v.tpe()))?
+            }
+            Ok(v)
+        }).collect::<Fallible<Vec<_>>>()?;
+        Ok(Value::Call { line, func, args, tpe: *return_type })
+    } else {
+        err(line, format!("{:?} is not a function", func.tpe()))?
+    }
+}
+
+fn check_builtin_call(line: i64, builtin: String, args: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    todo!()
+}
+
+fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    todo!()
+}
+
 fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     use scope::Value::*;
     match value {
-        Int { line, value } => Ok(Value::Int { line, value, tpe: Type::Int }),
-        Real { line, value } => Ok(Value::Real { line, value, tpe: Type::Real }),
-        Text { line, value } => Ok(Value::Text { line, value, tpe: Type::Text }),
-        Bool { line, value } => Ok(Value::Bool { line, value, tpe: Type::Bool }),
-        Var { line, name } => {
-            let tpe = env.get(&name).unwrap().clone();
-            Ok(Value::Var { line, name, tpe })
-        }
-        Assign { line, name, value } => {
-            let value = check_value(*value, env)?;
-            let tpe = value.tpe();
-            if let Some(var_type) = env.get(&name) {
-                if *var_type != tpe {
-                    err(line, "Type mismatch - the variable and the assigned value must have the same type".into())
-                } else {
-                    Ok(Value::Assign { line, name, value: Box::new(value), tpe })
-                }
-            } else {
-                Ok(Value::Init { line, name, value: Box::new(value), tpe })
-            }
-        }
-        Record { line, fields } => {
-            let fields = fields.into_iter().map(|(name, value)| {
-                Ok((name, check_value(value, env)?))
-            }).collect::<Fallible<HashMap<_, _>>>()?;
-            let field_types = fields.iter().map(|(name, value)| {
-                (name.clone(), value.tpe())
-            }).collect::<HashMap<_, _>>();
-            let tpe = Type::Record { fields: field_types };
-            Ok(Value::Record { line, fields, tpe })
-        }
-        Access { line, object, field } => {
-            let object = check_value(*object, env)?;
-            if let Type::Record { fields } = object.tpe() {
-                if let Some(tpe) = fields.get(&field).cloned() {
-                    Ok(Value::Access { line, object: Box::new(object), field, tpe })
-                } else {
-                    err(line, format!("Object does not have a field {}", field))
-                }
-            } else {
-                err(line, format!("Cannot access a field {}, value is not a record", field))
-            }
-        }
-        If { line, cond, then, elsë } => {
-            let cond = Box::new(check_value(*cond, env)?);
-            let then = then.into_iter().map(|v| {
-                check_value(v, env)
-            }).collect::<Fallible<Vec<_>>>()?;
-            let elsë = elsë.into_iter().map(|v| {
-                check_value(v, env)
-            }).collect::<Fallible<Vec<_>>>()?;
-            let then_t = then.last().map(Value::tpe);
-            let elsë_t = elsë.last().map(Value::tpe);
-            let tpe = if then_t.is_some() && then_t == elsë_t {
-                then_t.unwrap()
-            } else {
-                Type::Record { fields: HashMap::new() }
-            };
-            Ok(Value::If { line, cond, then, elsë, tpe })
-        }
-        While { line, cond, body } => {
-            let cond = Box::new(check_value(*cond, env)?);
-            let body = body.into_iter().map(|v| {
-                check_value(v, env)
-            }).collect::<Fallible<Vec<_>>>()?;
-            let tpe = Type::Record { fields: HashMap::new() };
-            Ok(Value::While { line, cond, body, tpe })
-        }
-        For { line, key, value, expr, body } => {
-            let expr = Box::new(check_value(*expr, env)?);
-            if let Type::List { item } = expr.tpe() {
-                env.insert(key.clone(), Type::Int);
-                env.insert(value.clone(), *item);
-            } else if let Type::Dict { key: kt, value: vt } = expr.tpe() {
-                env.insert(key.clone(), *kt);
-                env.insert(value.clone(), *vt);
-            } else {
-                err(line, "Expected a List or Dict in the for loop".into())?;
-            }
-            let body = body.into_iter().map(|v| {
-                check_value(v, env)
-            }).collect::<Fallible<Vec<_>>>()?;
-            let tpe = Type::Record { fields: HashMap::new() };
-            Ok(Value::For { line, key, value, expr, body, tpe })
-        }
-        Lambda { line, args, return_type, body } => {
-            let args = args.into_iter().map(|(name, tpe)| {
-                Ok((name, check_type(&tpe)?))
-            }).collect::<Fallible<Vec<(String, Type)>>>()?;
-            env.extend(args.clone());
-
-            let return_type = check_type(&return_type)?;
-            let tpe = Type::Func {
-                args: args.iter().map(|(_, t)| t.clone()).collect(),
-                return_type: Box::new(return_type.clone())
-            };
-            let body = body.into_iter().map(|v| {
-                check_value(v, env)
-            }).collect::<Fallible<Vec<_>>>()?;
-            let void = Type::Record { fields: HashMap::new() };
-            let body_t = body.last().map(Value::tpe).unwrap_or(void.clone());
-
-            if return_type == body_t || return_type == void {
-                Ok(Value::Lambda { line, args, return_type, body, tpe })
-            } else {
-                err(line, format!("Return type is {:?}, but the function actually returns {:?}", return_type, body_t))
-            }
-        }
+        Int { line, value } => check_int(line, value),
+        Real { line, value } => check_real(line, value),
+        Text { line, value } => check_text(line, value),
+        Bool { line, value } => check_bool(line, value),
+        Var { line, name } => check_var(line, name, env),
+        Assign { line, name, value } => check_assign(line, name, *value, env),
+        Record { line, fields } => check_record(line, fields, env),
+        Access { line, object, field } => check_access(line, *object, field, env),
+        If { line, cond, then, elsë } => check_if(line, *cond, then, elsë, env),
+        While { line, cond, body } => check_while(line, *cond, body, env),
+        For { line, key, value, expr, body } => check_for(line, key, value, *expr, body, env),
+        Lambda { line, args, return_type, body } => check_lambda(line, args, return_type, body, env),
         Call { line, func, args } => {
             if let Var { name, .. } = &*func && is_builtin_function(name) {
-
+                check_builtin_call(line, name.clone(), args, env)
             } else {
-                let func = check_value(*func, env)?;
-                if let Type::Func { args, return_type } = func.tpe() {
-                    
-                } else {
-                    err(line, format!("{:?} is not a function", func.tpe()))?
-                }
+                check_call(line, *func, args, env)
             }
-            todo!()
         }
-        BinOp { line, name, lhs, rhs } => todo!(),
+        BinOp { line, name, lhs, rhs } => check_bin_op(line, name, *lhs, *rhs, env)
     }
 }
 
