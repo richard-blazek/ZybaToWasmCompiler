@@ -207,7 +207,19 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
                 err(line, format!("Return type is {:?}, but the function actually returns {:?}", return_type, body_t))
             }
         }
-        Call { line, func, args } => todo!(),
+        Call { line, func, args } => {
+            if let Var { name, .. } = &*func && is_builtin_function(name) {
+
+            } else {
+                let func = check_value(*func, env)?;
+                if let Type::Func { args, return_type } = func.tpe() {
+                    
+                } else {
+                    err(line, format!("{:?} is not a function", func.tpe()))?
+                }
+            }
+            todo!()
+        }
         BinOp { line, name, lhs, rhs } => todo!(),
     }
 }
