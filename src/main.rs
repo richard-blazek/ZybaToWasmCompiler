@@ -38,7 +38,7 @@ fn main() {
             prime = false;
         } else {
             i = 2;
-            while i * i <= n && prime {
+            while i * i <= n & prime {
                 prime = n % i != 0;
                 i = i + 1;
             }
@@ -75,7 +75,7 @@ fn main() {
     merge = fun[a: List[Int], b: List[Int]] List[Int] {
         result = List[Int];
         i = 0;
-        while (i < a.count) && (i < b.count) {
+        while (i < a.count) & (i < b.count) {
             result.append[a.get[i], b.get[i]];
             i = i + 1;
         }

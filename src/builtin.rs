@@ -48,7 +48,7 @@ pub fn is_builtin_type(name: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Builtin {
     Mul, Div, Rem, And, Or, Xor, Add, Sub, Eq, Neq, Lt, Gt, Lte, Gte,
-    LogicAnd, LogicOr, Int, Real, Bool, Text, Dict, List, Not, Print,
+    Int, Real, Bool, Text, Dict, List, Not, Print,
     Set, Get, Has, Len, Insert, Erase, Append
 }
 
@@ -79,20 +79,13 @@ pub fn is_builtin_function(name: &str) -> bool {
 static OPERATORS : LazyLock<Vec<HashMap<&str, Builtin>>> = LazyLock::new(|| {
     use Builtin::*;
     vec![
-        HashMap::from([
-            ("*", Mul), ("/", Div), ("%", Rem),
-            ("&", And), ("|", Or),  ("^", Xor)
-        ]),
-        HashMap::from([
-            ("+", Add), ("-", Sub)
-        ]),
+        HashMap::from([("*", Mul), ("/", Div), ("%", Rem)]),
+        HashMap::from([("+", Add), ("-", Sub)]),
         HashMap::from([
             ("==", Eq), ("!=", Neq), ("<", Lt),
             ("<=", Lte), (">", Gt), (">=", Gte),
         ]),
-        HashMap::from([
-            ("&&", LogicAnd), ("||", LogicOr)
-        ])
+        HashMap::from([("&", And), ("|", Or),  ("^", Xor)])
     ]
 });
 
