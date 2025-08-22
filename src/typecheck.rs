@@ -47,34 +47,34 @@ impl Value {
     }
 }
 
-fn check_type(tpe: &scope::Value) -> Fallible<Type> {
+fn check_type(tpe: scope::Value) -> Fallible<Type> {
     use scope::Value::*;
     match tpe {
         Var { line, name } => {
-            if let Some(tpe) = get_scalar_type(name) {
+            if let Some(tpe) = get_scalar_type(&name) {
                 Ok(tpe)
             } else {
-                err(*line, format!("Type {} does not exist", name))
+                err(line, format!("Type {} does not exist", name))
             }
         },
         Call { line, func, args } => {
-            if let Var { name, .. } = *func.clone() {
-                let args = args.iter().map(check_type).collect::<Fallible<Vec<_>>>()?;
+            if let Var { name, .. } = *func {
+                let args = args.into_iter().map(check_type).collect::<Fallible<Vec<_>>>()?;
                 if let Some(tpe) = get_generic_type(&name, &args) {
                     Ok(tpe)
                 } else {
-                    err(*line, format!("Invalid generic type {}", name))
+                    err(line, format!("Invalid generic type {}", name))
                 }
             } else {
-                err(*line, "Repeated brackets in type declaration".into())
+                err(line, "Repeated brackets in type declaration".into())
             }
         }
         Record { fields, .. } => {
-            let mut new_fields = HashMap::new();
-            for (name, tpe) in fields {
-                new_fields.insert(name.clone(), check_type(tpe)?);
-            }
-            Ok(Type::Record { fields: new_fields })
+            Ok(Type::Record {
+                fields: fields.into_iter().map(|(name, tpe)| {
+                    Ok((name, check_type(tpe)?))
+                }).collect::<Fallible<HashMap<_, _>>>()?
+            })
         }
         _ => err(tpe.line(), "Invalid type expression".into())
     }
@@ -91,9 +91,9 @@ fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<Strin
             Text { .. } => env.insert(name.clone(), Type::Text),
             Bool { .. } => env.insert(name.clone(), Type::Bool),
             Lambda { args, return_type, .. } => {
-                let return_type = Box::new(check_type(return_type)?);
+                let return_type = Box::new(check_type(*return_type.clone())?);
                 let args = args.iter().map(|(_, t)| {
-                    check_type(t)
+                    check_type(t.clone())
                 }).collect::<Fallible<Vec<_>>>()?;
                 env.insert(name.clone(), Type::Func { args, return_type })
             }
@@ -212,11 +212,11 @@ fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Ve
 
 fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let args = args.into_iter().map(|(name, tpe)| {
-        Ok((name, check_type(&tpe)?))
+        Ok((name, check_type(tpe)?))
     }).collect::<Fallible<Vec<(String, Type)>>>()?;
     env.extend(args.clone());
 
-    let return_type = check_type(&return_type)?;
+    let return_type = check_type(return_type)?;
     let tpe = Type::Func {
         args: args.iter().map(|(_, t)| t.clone()).collect(),
         return_type: Box::new(return_type.clone())
