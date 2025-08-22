@@ -15,7 +15,9 @@ pub enum Type {
 
 static SCALAR_TYPES : LazyLock<HashMap<&str, Type>> = LazyLock::new(|| {
     use Type::*;
-    HashMap::from([("Int", Int), ("Real", Real), ("Text", Text), ("Bool", Bool)])
+    HashMap::from([
+        ("Int", Int), ("Real", Real), ("Text", Text), ("Bool", Bool)
+    ])
 });
 
 pub fn get_scalar_type(name: &str) -> Option<Type> {
@@ -24,15 +26,17 @@ pub fn get_scalar_type(name: &str) -> Option<Type> {
 
 pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
     match (name, args) {
-        ("List", [item]) => Some(Type::List { item: Box::new(item.clone()) }),
-        ("Dict", [k, v]) => {
-            Some(Type::Dict { key: Box::new(k.clone()), value: Box::new(v.clone()) })
-        }
-        ("Func", _) if !args.is_empty() => {
-            let return_type = Box::new(args[args.len() - 1].clone());
-            let args = args[0..args.len() - 1].iter().cloned().collect();
-            Some(Type::Func { args, return_type })
-        }
+        ("List", [item]) => Some(Type::List {
+            item: Box::new(item.clone())
+        }),
+        ("Dict", [key, value]) => Some(Type::Dict {
+            key: Box::new(key.clone()),
+            value: Box::new(value.clone())
+        }),
+        ("Func", [.., last]) => Some(Type::Func {
+            args: Vec::from(&args[0..args.len() - 1]),
+            return_type: Box::new(last.clone())
+        }),
         _ => None
     }
 }
