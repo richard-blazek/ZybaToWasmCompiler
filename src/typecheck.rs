@@ -164,12 +164,29 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
             let body = body.into_iter().map(|v| {
                 check_value(v, env)
             }).collect::<Fallible<Vec<_>>>()?;
-            Ok(Value::While { line, cond, body, tpe: Type::Record { fields: HashMap::new() } })
+            let tpe = Type::Record { fields: HashMap::new() };
+            Ok(Value::While { line, cond, body, tpe })
         }
+        For { line, key, value, expr, body } => {
+            let expr = Box::new(check_value(*expr, env)?);
+            if let Type::List { item } = expr.tpe() {
+                env.insert(key.clone(), Type::Int);
+                env.insert(value.clone(), *item);
+            } else if let Type::Dict { key: kt, value: vt } = expr.tpe() {
+                env.insert(key.clone(), *kt);
+                env.insert(value.clone(), *vt);
+            } else {
+                err(line, "Expected a List or Dict in the for loop".into())?;
+            }
+            let body = body.into_iter().map(|v| {
+                check_value(v, env)
+            }).collect::<Fallible<Vec<_>>>()?;
+            let tpe = Type::Record { fields: HashMap::new() };
+            Ok(Value::For { line, key, value, expr, body, tpe })
+        }
+        Lambda { line, args, return_type, body } => todo!(),
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
-        Lambda { line, args, return_type, body } => todo!(),
-        For { line, key, value, expr, body } => todo!(),
     }
 }
 
