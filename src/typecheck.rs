@@ -13,7 +13,7 @@ pub enum Value {
     Record { line: i64, fields: HashMap<String, Value>, tpe: Type },
     Var { line: i64, name: String, tpe: Type },
     Call { line: i64, func: Box<Value>, args: Vec<Value>, tpe: Type },
-    Builtin { line: i64, op: Builtin, args: Vec<Value>, tpe: Type },
+    Builtin { line: i64, op: String, args: Vec<Value>, tpe: Type },
     Access { line: i64, object: Box<Value>, field: String, tpe: Type },
     Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
     Init { line: i64, name: String, value: Box<Value>, tpe: Type },
@@ -254,7 +254,19 @@ fn check_call(line: i64, func: scope::Value, args: Vec<scope::Value>, env: &mut 
 }
 
 fn check_builtin_call(line: i64, builtin: String, args: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
-    todo!()
+    let type_args = args.iter().map_while(|arg| {
+        check_type(arg).ok()
+    }).collect::<Vec<_>>();
+    let args = args.into_iter().skip(type_args.len()).map(|arg| {
+        check_value(arg, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+    let arg_types = args.iter().map(Value::tpe).collect::<Vec<_>>();
+
+    if let Some(tpe) = builtin_fn(&builtin, &type_args, &arg_types) {
+        Ok(Value::Builtin { line, op: builtin, args, tpe })
+    } else {
+        err(line, format!("There is no built-in function {} accepting {:?} {:?} as arguments", builtin, type_args, arg_types))
+    }
 }
 
 fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {

@@ -14,8 +14,10 @@ fn main() {
     files.insert("math.zyba".to_string(), "
     factorial = fun[n: Int] Int {
         result = 1;
-        for i : n {
+        i = 1;
+        while i <= n {
             result = result * i;
+            i = i + 1;
         }
         result
     };
@@ -53,7 +55,7 @@ fn main() {
     };
 
     range = fun[n: Int] List[Int] {
-        result = List[Int];
+        result = list[Int];
         i = 0;
         while i < n {
             result.append[i + 1];
@@ -63,7 +65,7 @@ fn main() {
     };
 
     private concat = fun[LoL: List[List[Int]]] List[Int] {
-        result = List[Int];
+        result = list[Int];
         for item : LoL {
             result.append[item];
         }
@@ -71,7 +73,7 @@ fn main() {
     };
 
     merge = fun[a: List[Int], b: List[Int]] List[Int] {
-        result = List[Int];
+        result = list[Int];
         i = 0;
         while (i < a.count) & (i < b.count) {
             result.append[a.get[i], b.get[i]];

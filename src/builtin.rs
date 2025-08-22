@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,15 +13,14 @@ pub enum Type {
     Record { fields: HashMap<String, Type> },
 }
 
-static SCALAR_TYPES : LazyLock<HashMap<&str, Type>> = LazyLock::new(|| {
-    use Type::*;
-    HashMap::from([
-        ("Int", Int), ("Real", Real), ("Text", Text), ("Bool", Bool)
-    ])
-});
-
 pub fn get_scalar_type(name: &str) -> Option<Type> {
-    SCALAR_TYPES.get(name).cloned()
+    match name {
+        "Int" => Some(Type::Int),
+        "Real" => Some(Type::Real),
+        "Text" => Some(Type::Text),
+        "Bool" => Some(Type::Bool),
+        _ => None
+    }
 }
 
 pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
@@ -41,51 +40,104 @@ pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Builtin {
-    Mul, Div, Rem, And, Or, Xor, Add, Sub, Eq, Neq, Lt, Gt, Lte, Gte,
-    Int, Real, Bool, Text, Dict, List, Not, Print,
-    Set, Get, Has, Len, Insert, Erase, Append
-}
-
-static FUNCTIONS : LazyLock<HashMap<&str, Builtin>> = LazyLock::new(||
-    HashMap::from([
-        ("int", Builtin::Int),
-        ("real", Builtin::Real),
-        ("text", Builtin::Text),
-        ("bool", Builtin::Bool),
-        ("list", Builtin::List),
-        ("dict", Builtin::Dict),
-        ("not", Builtin::Not),
-        ("print", Builtin::Print),
-        ("set", Builtin::Set),
-        ("get", Builtin::Get),
-        ("has", Builtin::Has),
-        ("len", Builtin::Len),
-        ("insert", Builtin::Insert),
-        ("erase", Builtin::Erase),
-        ("append", Builtin::Append)
+static BUILTIN_NAMES : LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    HashSet::from([
+        "Int", "Real", "Text", "Bool", "List", "Dict", "Func",
+        "int", "real", "text", "bool", "list", "dict",
+        "not", "print", "len", "has", "get", "set", "del", "insert"
     ])
-);
+});
 
 pub fn is_builtin_name(name: &str) -> bool {
-    ["Int", "Real", "Text", "Bool", "List", "Dict", "Func"].contains(&name)
-    || FUNCTIONS.contains_key(name)
+    BUILTIN_NAMES.contains(name)
 }
 
-static OPERATORS : LazyLock<Vec<HashMap<&str, Builtin>>> = LazyLock::new(|| {
-    use Builtin::*;
+static OPERATORS : LazyLock<Vec<HashSet<&str>>> = LazyLock::new(|| {
     vec![
-        HashMap::from([("*", Mul), ("/", Div), ("%", Rem)]),
-        HashMap::from([("+", Add), ("-", Sub)]),
-        HashMap::from([
-            ("==", Eq), ("!=", Neq), ("<", Lt),
-            ("<=", Lte), (">", Gt), (">=", Gte),
-        ]),
-        HashMap::from([("&", And), ("|", Or),  ("^", Xor)])
+        HashSet::from(["*", "/", "%"]),
+        HashSet::from(["+", "-"]),
+        HashSet::from(["==", "!=", "<", "<=", ">", ">="]),
+        HashSet::from(["&", "|", "^"])
     ]
 });
 
 pub fn is_builtin_operator(name: &str) -> bool {
-    OPERATORS.iter().any(|hash_map| hash_map.contains_key(name))
+    OPERATORS.iter().any(|set| set.contains(name))
+}
+
+fn void() -> Type {
+    Type::Record { fields: HashMap::new() }
+}
+
+pub fn builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> Option<Type> {
+    use Type::*;
+
+    match (name, type_args, arg_types) {
+        ("int", [], [Int | Bool | Real | Text]) => Some(Int),
+        ("real", [], [Int | Real | Text]) => Some(Real),
+        ("bool", [], [Int | Bool]) => Some(Bool),
+        ("text", [], [Int | Bool | Real | Text]) => Some(Text),
+        ("list", [item], _) => {
+            if arg_types.iter().all(|t| t == item) {
+                Some(List { item: Box::new(item.clone()) })
+            } else {
+                None
+            }
+        }
+        ("dict", [key, value], _) => {
+            let k_v = [key.clone(), value.clone()];
+            if arg_types.chunks(2).all(|pair| pair == k_v) {
+                Some(Dict {
+                    key: Box::new(key.clone()),
+                    value: Box::new(value.clone())
+                })
+            } else {
+                None
+            }
+        }
+        ("not", [], [Int]) => Some(Int),
+        ("not", [], [Bool]) => Some(Bool),
+        ("print", [], [Text]) => Some(void()),
+        ("len", [], [List { .. } | Dict { .. }]) => Some(Int),
+        ("has", [], [List { .. }, Int]) => Some(Bool),
+        ("has", [], [Dict { key, .. }, k]) if **key == *k => Some(Bool),
+        ("get", [], [List { item }, Int]) => Some(*item.clone()),
+        ("get", [], [Dict { key, value }, k]) if **key == *k => Some(*value.clone()),
+        ("set", [], [List { item }, Int, new_item]) => {
+            if **item == *new_item {
+                Some(void())
+            } else {
+                None
+            }
+        }
+        ("set", [], [Dict { key, value }, k, v]) => {
+            if **key == *k && **value == *v {
+                Some(void())
+            } else {
+                None
+            }
+        }
+        ("del", [], [List { item }, Int, new_item]) => {
+            if **item == *new_item {
+                Some(void())
+            } else {
+                None
+            }
+        }
+        ("del", [], [Dict { key, value }, k, v]) => {
+            if **key == *k && **value == *v {
+                Some(void())
+            } else {
+                None
+            }
+        }
+        ("insert", [], [List { item }, Int, new_item]) => {
+            if **item == *new_item {
+                Some(void())
+            } else {
+                None
+            }
+        }
+        _ => None
+    }
 }
