@@ -34,17 +34,6 @@ impl Value {
             | If { tpe, .. } | While { tpe, .. } | For { tpe, .. } => tpe.clone()
         }
     }
-
-    pub fn line(&self) -> i64 {
-        use Value::*;
-        match self {
-            Int { line, .. } | Real { line, .. } | Text { line, .. }
-            | Bool { line, .. } | Record { line, .. } | Var { line, .. }
-            | Call { line, .. } | Builtin { line, .. } | Access { line, .. }
-            | Lambda { line, .. } | Init { line, .. } | Assign { line, .. }
-            | If { line, .. } | While { line, .. } | For { line, .. } => *line
-        }
-    }
 }
 
 fn check_type(tpe: &scope::Value) -> Fallible<Type> {
@@ -135,7 +124,7 @@ fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<
     let value = Box::new(check_value(value, env)?);
     let tpe = env.get(&name).unwrap().clone();
     if tpe != value.tpe() {
-        err(line, format!("Assigning {:?} to {:?}", value.tpe(), tpe))?
+        err(line, format!("Assigning {} to {}", value.tpe(), tpe))?
     }
     Ok(Value::Assign { line, name, value, tpe })
 }
@@ -161,7 +150,7 @@ fn check_access(line: i64, object: scope::Value, field: String, env: &mut HashMa
             err(line, format!("Record does not have a field {}", field))
         }
     } else {
-        err(line, format!("{:?} is not a record", object.tpe()))
+        err(line, format!("{} is not a record", object.tpe()))
     }
 }
 
@@ -230,7 +219,7 @@ fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope
     if return_type == body_t || return_type == void {
         Ok(Value::Lambda { line, args, return_type, body, tpe })
     } else {
-        err(line, format!("Return type is {:?}, but the function actually returns {:?}", return_type, body_t))
+        err(line, format!("Return type is {}, but the function returns {}", return_type, body_t))
     }
 }
 
@@ -243,13 +232,13 @@ fn check_call(line: i64, func: scope::Value, args: Vec<scope::Value>, env: &mut 
         let args = args.into_iter().zip(expected).map(|(v, e_t)| {
             let v = check_value(v, env)?;
             if v.tpe() != e_t {
-                err(line, format!("Expected {:?} but got {:?}", e_t, v.tpe()))?
+                err(line, format!("Expected {} but got {}", e_t, v.tpe()))?
             }
             Ok(v)
         }).collect::<Fallible<Vec<_>>>()?;
         Ok(Value::Call { line, func, args, tpe: *return_type })
     } else {
-        err(line, format!("{:?} is not a function", func.tpe()))?
+        err(line, format!("{} is not a function", func.tpe()))?
     }
 }
 
@@ -262,15 +251,24 @@ fn check_builtin_call(line: i64, builtin: String, args: Vec<scope::Value>, env: 
     }).collect::<Fallible<Vec<_>>>()?;
     let arg_types = args.iter().map(Value::tpe).collect::<Vec<_>>();
 
-    if let Some(tpe) = builtin_fn(&builtin, &type_args, &arg_types) {
+    if let Some(tpe) = apply_builtin_fn(&builtin, &type_args, &arg_types) {
         Ok(Value::Builtin { line, op: builtin, args, tpe })
     } else {
-        err(line, format!("There is no built-in function {} accepting {:?} {:?} as arguments", builtin, type_args, arg_types))
+        let arg_str = type_args.iter().chain(arg_types.iter()).map(|t| {
+            format!("{}", t)
+        }).collect::<Vec<_>>().join(", ");
+        err(line, format!("There is no built-in function {}[{}]", builtin, arg_str))
     }
 }
 
 fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
-    todo!()
+    let lhs = check_value(lhs, env)?;
+    let rhs = check_value(rhs, env)?;
+    if let Some(tpe) = apply_builtin_op(&name, lhs.tpe(), rhs.tpe()) {
+        Ok(Value::Builtin { line, op: name, args: vec![lhs, rhs], tpe })
+    } else {
+        err(line, format!("Operator {} does not accept {} and {}", name, lhs.tpe(), rhs.tpe()))
+    }
 }
 
 fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {

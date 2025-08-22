@@ -58,7 +58,7 @@ fn main() {
         result = list[Int];
         i = 0;
         while i < n {
-            result.append[i + 1];
+            insert[result, len[result], i + 1];
             i = i + 1;
         }
         result
@@ -66,8 +66,10 @@ fn main() {
 
     private concat = fun[LoL: List[List[Int]]] List[Int] {
         result = list[Int];
-        for item : LoL {
-            result.append[item];
+        for lst : LoL {
+            for item : lst {
+                insert[result, len[result], item];
+            }
         }
         result
     };
@@ -75,8 +77,9 @@ fn main() {
     merge = fun[a: List[Int], b: List[Int]] List[Int] {
         result = list[Int];
         i = 0;
-        while (i < a.count) & (i < b.count) {
-            result.append[a.get[i], b.get[i]];
+        while (i < len[a]) & (i < len[b]) {
+            insert[result, len[result], get[a, i]];
+            insert[result, len[result], get[b, i]];
             i = i + 1;
         }
         result
@@ -85,8 +88,8 @@ fn main() {
     main = fun[] () {
         nums_to_120 = range[math::factorial[5]];
         for i, num : nums_to_120 {
-            print[i];
-            print[num];
+            print[text[i]];
+            print[text[num]];
         }
     };".to_string());
 
