@@ -16,11 +16,53 @@ pub enum Value {
     Builtin { line: i64, op: Builtin, args: Vec<Value>, tpe: Type },
     Access { line: i64, object: Box<Value>, field: String, tpe: Type },
     Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
-    Init { line: i64, name: String, value: Box<Value> },
-    Assign { line: i64, name: String, value: Box<Value> },
-    If { line: i64, cond: Box<Value>, then: Vec<Value>, otherwise: Vec<Value> },
-    While { line: i64, cond: Box<Value>, body: Vec<Value> },
-    For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value> },
+    Init { line: i64, name: String, value: Box<Value>, tpe: Type },
+    Assign { line: i64, name: String, value: Box<Value>, tpe: Type },
+    If { line: i64, cond: Box<Value>, then: Vec<Value>, otherwise: Vec<Value>, tpe: Type },
+    While { line: i64, cond: Box<Value>, body: Vec<Value>, tpe: Type },
+    For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value>, tpe: Type },
+}
+
+impl Value {
+    pub fn tpe(&self) -> Type {
+        match self {
+            Value::Int { tpe, .. }
+            | Value::Real { tpe, .. }
+            | Value::Text { tpe, .. }
+            | Value::Bool { tpe, .. }
+            | Value::Record { tpe, .. }
+            | Value::Var { tpe, .. }
+            | Value::Call { tpe, .. }
+            | Value::Builtin { tpe, .. }
+            | Value::Access { tpe, .. }
+            | Value::Lambda { tpe, .. }
+            | Value::Init { tpe, .. }
+            | Value::Assign { tpe, .. }
+            | Value::If { tpe, .. }
+            | Value::While { tpe, .. }
+            | Value::For { tpe, .. } => tpe.clone()
+        }
+    }
+
+    pub fn line(&self) -> i64 {
+        match self {
+            Value::Int { line, .. }
+            | Value::Real { line, .. }
+            | Value::Text { line, .. }
+            | Value::Bool { line, .. }
+            | Value::Record { line, .. }
+            | Value::Var { line, .. }
+            | Value::Call { line, .. }
+            | Value::Builtin { line, .. }
+            | Value::Access { line, .. }
+            | Value::Lambda { line, .. }
+            | Value::Init { line, .. }
+            | Value::Assign { line, .. }
+            | Value::If { line, .. }
+            | Value::While { line, .. }
+            | Value::For { line, .. } => *line
+        }
+    }
 }
 
 fn parse_type(tpe: &scope::Type) -> Fallible<Type> {
@@ -83,12 +125,24 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
             let tpe = env.get(&name).unwrap().clone();
             Ok(Value::Var { line, name, tpe })
         }
+        Assign { line, name, value } => {
+            let value = check_value(*value, env)?;
+            let tpe = value.tpe();
+            if let Some(var_type) = env.get(&name) {
+                if *var_type != tpe {
+                    err(line, "Type mismatch - the variable and the assigned value must have the same type".into())
+                } else {
+                    Ok(Value::Assign { line, name, value: Box::new(value), tpe })
+                }
+            } else {
+                Ok(Value::Init { line, name, value: Box::new(value), tpe })
+            }
+        }
         Record { line, fields } => todo!(),
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
         Access { line, object, field } => todo!(),
         Lambda { line, args, return_type, body } => todo!(),
-        Assign { line, name, value } => todo!(),
         If { line, cond, then, otherwise } => todo!(),
         While { line, cond, body } => todo!(),
         For { line, key, value, expr, body } => todo!(),
