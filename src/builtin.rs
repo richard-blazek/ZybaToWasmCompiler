@@ -50,12 +50,12 @@ pub enum Builtin {
 
 static FUNCTIONS : LazyLock<HashMap<&str, Builtin>> = LazyLock::new(||
     HashMap::from([
-        ("Int", Builtin::Int),
-        ("Real", Builtin::Real),
-        ("Text", Builtin::Text),
-        ("Bool", Builtin::Bool),
-        ("List", Builtin::List),
-        ("Dict", Builtin::Dict),
+        ("int", Builtin::Int),
+        ("real", Builtin::Real),
+        ("text", Builtin::Text),
+        ("bool", Builtin::Bool),
+        ("list", Builtin::List),
+        ("dict", Builtin::Dict),
         ("not", Builtin::Not),
         ("print", Builtin::Print),
         ("set", Builtin::Set),

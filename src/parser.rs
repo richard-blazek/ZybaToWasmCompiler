@@ -22,19 +22,6 @@ pub enum Expr {
     For { line: i64, key: Option<String>, value: String, expr: Box<Expr>, body: Vec<Expr> }
 }
 
-impl Expr {
-    pub fn line(&self) -> i64 {
-        use Expr::*;
-        match self {
-            Int { line, .. } | Real { line, .. } | Text { line, .. }
-            | Bool { line, .. } | Record { line, .. } | Var { line, .. }
-            | Call { line, .. } | BinOp { line, .. } | Access { line, .. }
-            | Lambda { line, .. } | Assign { line, .. } | If { line, .. }
-            | While { line, .. } | For { line, .. } => *line
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Import { line: i64, path: String },
