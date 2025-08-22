@@ -25,42 +25,24 @@ pub enum Value {
 
 impl Value {
     pub fn tpe(&self) -> Type {
+        use Value::*;
         match self {
-            Value::Int { tpe, .. }
-            | Value::Real { tpe, .. }
-            | Value::Text { tpe, .. }
-            | Value::Bool { tpe, .. }
-            | Value::Record { tpe, .. }
-            | Value::Var { tpe, .. }
-            | Value::Call { tpe, .. }
-            | Value::Builtin { tpe, .. }
-            | Value::Access { tpe, .. }
-            | Value::Lambda { tpe, .. }
-            | Value::Init { tpe, .. }
-            | Value::Assign { tpe, .. }
-            | Value::If { tpe, .. }
-            | Value::While { tpe, .. }
-            | Value::For { tpe, .. } => tpe.clone()
+            Int { tpe, .. } | Real { tpe, .. } | Text { tpe, .. }
+            | Bool { tpe, .. } | Record { tpe, .. } | Var { tpe, .. }
+            | Call { tpe, .. } | Builtin { tpe, .. } | Access { tpe, .. }
+            | Lambda { tpe, .. } | Init { tpe, .. } | Assign { tpe, .. }
+            | If { tpe, .. } | While { tpe, .. } | For { tpe, .. } => tpe.clone()
         }
     }
 
     pub fn line(&self) -> i64 {
+        use Value::*;
         match self {
-            Value::Int { line, .. }
-            | Value::Real { line, .. }
-            | Value::Text { line, .. }
-            | Value::Bool { line, .. }
-            | Value::Record { line, .. }
-            | Value::Var { line, .. }
-            | Value::Call { line, .. }
-            | Value::Builtin { line, .. }
-            | Value::Access { line, .. }
-            | Value::Lambda { line, .. }
-            | Value::Init { line, .. }
-            | Value::Assign { line, .. }
-            | Value::If { line, .. }
-            | Value::While { line, .. }
-            | Value::For { line, .. } => *line
+            Int { line, .. } | Real { line, .. } | Text { line, .. }
+            | Bool { line, .. } | Record { line, .. } | Var { line, .. }
+            | Call { line, .. } | Builtin { line, .. } | Access { line, .. }
+            | Lambda { line, .. } | Init { line, .. } | Assign { line, .. }
+            | If { line, .. } | While { line, .. } | For { line, .. } => *line
         }
     }
 }
