@@ -17,7 +17,7 @@ pub enum Expr {
     Access { line: i64, object: Box<Expr>, field: String },
     Lambda { line: i64, args: Vec<(String, Expr)>, return_type: Box<Expr>, body: Vec<Expr> },
     Assign { line: i64, name: String, expr: Box<Expr> },
-    If { line: i64, cond: Box<Expr>, then: Vec<Expr>, otherwise: Vec<Expr> },
+    If { line: i64, cond: Box<Expr>, then: Vec<Expr>, elsε: Vec<Expr> },
     While { line: i64, cond: Box<Expr>, body: Vec<Expr> },
     For { line: i64, key: Option<String>, value: String, expr: Box<Expr>, body: Vec<Expr> }
 }
@@ -218,13 +218,13 @@ fn parse_if(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
     let cond = Box::new(cond);
 
     if let Token::Name { name, .. } = &tokens[i] && name == "else" {
-        let (i, otherwise) = parse_block(tokens, i + 1)?;
-        Ok((i, Expr::If { line, cond, then, otherwise }))
+        let (i, elsε) = parse_block(tokens, i + 1)?;
+        Ok((i, Expr::If { line, cond, then, elsε }))
     } else if let Token::Name { name, .. } = &tokens[i] && name == "elif" {
         let (i, elif) = parse_if(tokens, i + 1, line)?;
-        Ok((i, Expr::If { line, cond, then, otherwise: vec![elif] }))
+        Ok((i, Expr::If { line, cond, then, elsε: vec![elif] }))
     } else {
-        Ok((i, Expr::If { line, cond, then, otherwise: vec![] }))
+        Ok((i, Expr::If { line, cond, then, elsε: vec![] }))
     }
 }
 

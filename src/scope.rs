@@ -24,7 +24,7 @@ pub enum Value {
     Access { line: i64, object: Box<Value>, field: String },
     Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value> },
     Assign { line: i64, name: String, value: Box<Value> },
-    If { line: i64, cond: Box<Value>, then: Vec<Value>, otherwise: Vec<Value> },
+    If { line: i64, cond: Box<Value>, then: Vec<Value>, elsε: Vec<Value> },
     While { line: i64, cond: Box<Value>, body: Vec<Value> },
     For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value> },
 }
@@ -257,11 +257,11 @@ fn nr_expr(e: parser::Expr, module_path: &str, env: &mut LocalEnv) -> Fallible<V
             let name = env.var_name(module_path, &name).unwrap();
             Ok(Value::Assign { line, name, value: Box::new(value) })
         }
-        parser::Expr::If { line, cond, then, otherwise } => {
+        parser::Expr::If { line, cond, then, elsε } => {
             let cond = nr_expr(*cond, module_path, &mut LocalEnv::new_scope(env))?;
             let then = nr_exprs(then, module_path, LocalEnv::new_scope(env))?;
-            let otherwise = nr_exprs(otherwise, module_path, LocalEnv::new_scope(env))?;
-            Ok(Value::If { line, cond: Box::new(cond), then, otherwise })
+            let elsε = nr_exprs(elsε, module_path, LocalEnv::new_scope(env))?;
+            Ok(Value::If { line, cond: Box::new(cond), then, elsε })
         }
         parser::Expr::While { line, cond, body } => {
             let cond = nr_expr(*cond, module_path, &mut LocalEnv::new_scope(env))?;

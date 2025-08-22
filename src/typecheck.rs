@@ -18,7 +18,7 @@ pub enum Value {
     Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
     Init { line: i64, name: String, value: Box<Value>, tpe: Type },
     Assign { line: i64, name: String, value: Box<Value>, tpe: Type },
-    If { line: i64, cond: Box<Value>, then: Vec<Value>, otherwise: Vec<Value>, tpe: Type },
+    If { line: i64, cond: Box<Value>, then: Vec<Value>, elsε: Vec<Value>, tpe: Type },
     While { line: i64, cond: Box<Value>, body: Vec<Value>, tpe: Type },
     For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value>, tpe: Type },
 }
@@ -142,11 +142,33 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
                 err(line, format!("Cannot access a field {}, value is not a record", field))
             }
         }
+        If { line, cond, then, elsε } => {
+            let cond = Box::new(check_value(*cond, env)?);
+            let then = then.into_iter().map(|v| {
+                check_value(v, env)
+            }).collect::<Fallible<Vec<_>>>()?;
+            let elsε = elsε.into_iter().map(|v| {
+                check_value(v, env)
+            }).collect::<Fallible<Vec<_>>>()?;
+            let then_t = then.last().map(Value::tpe);
+            let elsε_t = elsε.last().map(Value::tpe);
+            let tpe = if then_t.is_some() && then_t == elsε_t {
+                then_t.unwrap()
+            } else {
+                Type::Record { fields: HashMap::new() }
+            };
+            Ok(Value::If { line, cond, then, elsε, tpe })
+        }
+        While { line, cond, body } => {
+            let cond = Box::new(check_value(*cond, env)?);
+            let body = body.into_iter().map(|v| {
+                check_value(v, env)
+            }).collect::<Fallible<Vec<_>>>()?;
+            Ok(Value::While { line, cond, body, tpe: Type::Record { fields: HashMap::new() } })
+        }
         Call { line, func, args } => todo!(),
         BinOp { line, name, lhs, rhs } => todo!(),
         Lambda { line, args, return_type, body } => todo!(),
-        If { line, cond, then, otherwise } => todo!(),
-        While { line, cond, body } => todo!(),
         For { line, key, value, expr, body } => todo!(),
     }
 }
