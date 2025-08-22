@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use crate::error::err;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
@@ -11,6 +13,30 @@ pub enum Type {
     Dict { key: Box<Type>, value: Box<Type> },
     Func { args: Vec<Type>, return_type: Box<Type> },
     Record { fields: HashMap<String, Type> },
+}
+
+static SCALAR_TYPES : LazyLock<HashMap<&str, Type>> = LazyLock::new(|| {
+    use Type::*;
+    HashMap::from([("Int", Int), ("Real", Real), ("Text", Text), ("Bool", Bool)])
+});
+
+pub fn get_scalar_type(name: &str) -> Option<Type> {
+    SCALAR_TYPES.get(name).cloned()
+}
+
+pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
+    match (name, args) {
+        ("List", [item]) => Some(Type::List { item: Box::new(item.clone()) }),
+        ("Dict", [k, v]) => {
+            Some(Type::Dict { key: Box::new(k.clone()), value: Box::new(v.clone()) })
+        }
+        ("Func", _) if !args.is_empty() => {
+            let return_type = Box::new(args[args.len() - 1].clone());
+            let args = args[0..args.len() - 1].iter().cloned().collect();
+            Some(Type::Func { args, return_type })
+        }
+        _ => None
+    }
 }
 
 pub fn is_builtin_type(name: &str) -> bool {
@@ -48,34 +74,25 @@ pub fn is_builtin_function(name: &str) -> bool {
     FUNCTIONS.contains_key(name)
 }
 
-static OPERATORS : LazyLock<Vec<HashMap<&str, Builtin>>> = LazyLock::new(||
+static OPERATORS : LazyLock<Vec<HashMap<&str, Builtin>>> = LazyLock::new(|| {
+    use Builtin::*;
     vec![
         HashMap::from([
-            ("*", Builtin::Mul),
-            ("/", Builtin::Div),
-            ("%", Builtin::Rem),
-            ("&", Builtin::And),
-            ("|", Builtin::Or),
-            ("^", Builtin::Xor)
+            ("*", Mul), ("/", Div), ("%", Rem),
+            ("&", And), ("|", Or),  ("^", Xor)
         ]),
         HashMap::from([
-            ("+", Builtin::Add),
-            ("-", Builtin::Sub)
+            ("+", Add), ("-", Sub)
         ]),
         HashMap::from([
-            ("==", Builtin::Eq),
-            ("!=", Builtin::Neq),
-            ("<", Builtin::Lt),
-            ("<=", Builtin::Lte),
-            (">", Builtin::Gt),
-            (">=", Builtin::Gte),
+            ("==", Eq), ("!=", Neq), ("<", Lt),
+            ("<=", Lte), (">", Gt), (">=", Gte),
         ]),
         HashMap::from([
-            ("&&", Builtin::LogicAnd),
-            ("||", Builtin::LogicOr)
+            ("&&", LogicAnd), ("||", LogicOr)
         ])
     ]
-);
+});
 
 pub fn is_builtin_operator(name: &str) -> bool {
     OPERATORS.iter().any(|hash_map| hash_map.contains_key(name))

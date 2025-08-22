@@ -7,7 +7,7 @@ use crate::parser;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Scalar { line: i64, name: String },
-    Generic { line: i64, template: Box<Type>, args: Vec<Type> },
+    Generic { line: i64, template: String, args: Vec<Type> },
     Record { line: i64, fields: HashMap<String, Type> }
 }
 
@@ -213,9 +213,12 @@ fn nr_type(val: parser::Value) -> Fallible<Type> {
             }
         },
         Call { line, func, args } => {
-            let template = nr_type(*func)?;
-            let args: Fallible<Vec<_>> = args.into_iter().map(nr_type).collect();
-            Ok(Type::Generic { line, template: Box::new(template), args: args? })
+            if let Type::Scalar { name, .. } = nr_type(*func)? {
+                let args: Fallible<Vec<_>> = args.into_iter().map(nr_type).collect();
+                Ok(Type::Generic { line, template: name, args: args? })
+            } else {
+                err(line, "Cannot repeat bracket calls in type declaration".to_string())
+            }
         }
         Record { line, fields } => {
             let mut new_fields = HashMap::new();
