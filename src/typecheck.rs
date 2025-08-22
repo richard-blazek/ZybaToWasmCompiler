@@ -15,18 +15,12 @@ pub enum Value {
     Call { line: i64, func: Box<Value>, args: Vec<Value>, tpe: Type },
     Builtin { line: i64, op: Builtin, args: Vec<Value>, tpe: Type },
     Access { line: i64, object: Box<Value>, field: String, tpe: Type },
-    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Statement>, tpe: Type }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Statement {
-    Value { line: i64, value: Value },
-    Init { line: i64, name: String, value: Value },
-    Assign { line: i64, name: String, value: Value },
-    If { line: i64, cond: Value, then: Vec<Statement>, otherwise: Vec<Statement> },
-    While { line: i64, cond: Value, body: Vec<Statement> },
-    For { line: i64, key: String, value: String, expr: Value, body: Vec<Statement> },
-    Return { line: i64, value: Value }
+    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
+    Init { line: i64, name: String, value: Box<Value> },
+    Assign { line: i64, name: String, value: Box<Value> },
+    If { line: i64, cond: Box<Value>, then: Vec<Value>, otherwise: Vec<Value> },
+    While { line: i64, cond: Box<Value>, body: Vec<Value> },
+    For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value> },
 }
 
 fn parse_type(tpe: &scope::Type) -> Fallible<Type> {
