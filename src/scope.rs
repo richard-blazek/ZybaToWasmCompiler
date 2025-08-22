@@ -13,13 +13,6 @@ fn builtin_check(line: i64, name: &str) -> Fallible<()> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Type {
-    Scalar { line: i64, name: String },
-    Generic { line: i64, template: String, args: Vec<Type> },
-    Record { line: i64, fields: HashMap<String, Type> }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int { line: i64, value: i64 },
     Real { line: i64, value: f64 },
@@ -30,7 +23,7 @@ pub enum Value {
     Call { line: i64, func: Box<Value>, args: Vec<Value> },
     BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
-    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value> },
+    Lambda { line: i64, args: Vec<(String, Value)>, return_type: Box<Value>, body: Vec<Value> },
     Init { line: i64, name: String, value: Box<Value> },
     Assign { line: i64, name: String, value: Box<Value> },
     If { line: i64, cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value> },
@@ -175,39 +168,6 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn nameres_type(e: Expr) -> Fallible<Type> {
-    match e {
-        Expr::Var { line, name, .. } => {
-            if is_builtin_name(&name) {
-                Ok(Type::Scalar { line, name })
-            } else {
-                err(line, format!("Undefined type {}", name))
-            }
-        },
-        Expr::Call { line, func, args } => {
-            if let Type::Scalar { name, .. } = nameres_type(*func)? {
-                Ok(Type::Generic {
-                    line,
-                    template: name,
-                    args: args.into_iter()
-                              .map(nameres_type)
-                              .collect::<Fallible<Vec<_>>>()?
-                })
-            } else {
-                err(line, "Repeated brackets in type declaration".into())
-            }
-        }
-        Expr::Record { line, fields } => {
-            let mut new_fields = HashMap::new();
-            for (key, value) in fields {
-                new_fields.insert(key, nameres_type(value)?);
-            }
-            Ok(Type::Record { line, fields: new_fields })
-        }
-        _ => err(e.line(), "Not a valid type expression".into())
-    }
-}
-
 fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
     match e {
         Expr::Int { line, value } => Ok(Value::Int { line, value }),
@@ -261,6 +221,7 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
         }),
         Expr::Lambda { line, args, return_type, body } => {
             let mut inner = LocalEnv::new_scope(env);
+
             let args = args.into_iter().map(|(name, tpe)| {
                 builtin_check(line, &name)?;
                 let name = if let Some(name) = inner.new_var(&name, true) {
@@ -268,12 +229,18 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
                 } else {
                     err(line, format!("Duplicate argument name {}", name))?
                 };
-                Ok((name, nameres_type(tpe)?))
+                Ok((name, nameres_expr(tpe, ns_path, &mut inner)?))
             }).collect::<Fallible<Vec<_>>>()?;
 
+            let return_type = nameres_expr(*return_type, ns_path, &mut inner)?;
             let body = nameres_exprs(body, ns_path, inner)?;
-            let return_type = nameres_type(*return_type)?;
-            Ok(Value::Lambda { line, args, return_type, body })
+
+            Ok(Value::Lambda {
+                line,
+                args,
+                return_type: Box::new(return_type),
+                body
+            })
         }
         Expr::Assign { line, name, expr: value } => {
             builtin_check(line, &name)?;

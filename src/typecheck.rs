@@ -47,22 +47,26 @@ impl Value {
     }
 }
 
-fn check_type(tpe: &scope::Type) -> Fallible<Type> {
-    use scope::Type::*;
+fn check_type(tpe: &scope::Value) -> Fallible<Type> {
+    use scope::Value::*;
     match tpe {
-        Scalar { line, name } => {
+        Var { line, name } => {
             if let Some(tpe) = get_scalar_type(name) {
                 Ok(tpe)
             } else {
                 err(*line, format!("Type {} does not exist", name))
             }
         },
-        Generic { line, template, args } => {
-            let args = args.iter().map(check_type).collect::<Fallible<Vec<_>>>()?;
-            if let Some(tpe) = get_generic_type(template, &args) {
-                Ok(tpe)
+        Call { line, func, args } => {
+            if let Var { name, .. } = *func.clone() {
+                let args = args.iter().map(check_type).collect::<Fallible<Vec<_>>>()?;
+                if let Some(tpe) = get_generic_type(&name, &args) {
+                    Ok(tpe)
+                } else {
+                    err(*line, format!("Invalid generic type {}", name))
+                }
             } else {
-                err(*line, format!("Invalid generic type {}", template))
+                err(*line, "Repeated brackets in type declaration".into())
             }
         }
         Record { fields, .. } => {
@@ -72,6 +76,7 @@ fn check_type(tpe: &scope::Type) -> Fallible<Type> {
             }
             Ok(Type::Record { fields: new_fields })
         }
+        _ => err(tpe.line(), "Invalid type expression".into())
     }
 }
 
@@ -205,7 +210,7 @@ fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Ve
     Ok(Value::For { line, key, value, expr, body, tpe })
 }
 
-fn check_lambda(line: i64, args: Vec<(String, scope::Type)>, return_type: scope::Type, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let args = args.into_iter().map(|(name, tpe)| {
         Ok((name, check_type(&tpe)?))
     }).collect::<Fallible<Vec<(String, Type)>>>()?;
@@ -271,7 +276,7 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
         If { line, cond, then, elsë } => check_if(line, *cond, then, elsë, env),
         While { line, cond, body } => check_while(line, *cond, body, env),
         For { line, key, value, expr, body } => check_for(line, key, value, *expr, body, env),
-        Lambda { line, args, return_type, body } => check_lambda(line, args, return_type, body, env),
+        Lambda { line, args, return_type, body } => check_lambda(line, args, *return_type, body, env),
         Call { line, func, args } => {
             if let Var { name, .. } = &*func && is_builtin_name(name) {
                 check_builtin_call(line, name.clone(), args, env)
