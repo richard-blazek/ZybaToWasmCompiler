@@ -41,10 +41,6 @@ pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
     }
 }
 
-pub fn is_builtin_type(name: &str) -> bool {
-    ["Int", "Real", "Text", "Bool", "List", "Dict", "Func"].contains(&name)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Builtin {
     Mul, Div, Rem, And, Or, Xor, Add, Sub, Eq, Neq, Lt, Gt, Lte, Gte,
@@ -72,8 +68,9 @@ static FUNCTIONS : LazyLock<HashMap<&str, Builtin>> = LazyLock::new(||
     ])
 );
 
-pub fn is_builtin_function(name: &str) -> bool {
-    FUNCTIONS.contains_key(name)
+pub fn is_builtin_name(name: &str) -> bool {
+    ["Int", "Real", "Text", "Bool", "List", "Dict", "Func"].contains(&name)
+    || FUNCTIONS.contains_key(name)
 }
 
 static OPERATORS : LazyLock<Vec<HashMap<&str, Builtin>>> = LazyLock::new(|| {

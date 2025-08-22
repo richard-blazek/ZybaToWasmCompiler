@@ -1,8 +1,16 @@
 use std::collections::HashMap;
 
-use crate::builtin::{is_builtin_type, is_builtin_function};
+use crate::builtin::is_builtin_name;
 use crate::error::{err, Fallible};
-use crate::parser;
+use crate::parser::{Decl, Expr};
+
+fn builtin_check(line: i64, name: &str) -> Fallible<()> {
+    if is_builtin_name(name) {
+        err(line, format!("{} is a builtin name", name))
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -23,6 +31,7 @@ pub enum Value {
     BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
     Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value> },
+    Init { line: i64, name: String, value: Box<Value> },
     Assign { line: i64, name: String, value: Box<Value> },
     If { line: i64, cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value> },
     While { line: i64, cond: Box<Value>, body: Vec<Value> },
@@ -36,8 +45,8 @@ impl Value {
             Int { line, .. } | Real { line, .. } | Text { line, .. }
             | Bool { line, .. } | Record { line, .. } | Var { line, .. }
             | Call { line, .. } | BinOp { line, .. } | Access { line, .. }
-            | Lambda { line, .. } | Assign { line, .. } | If { line, .. }
-            | While { line, .. } | For { line, .. } => *line
+            | Lambda { line, .. } | Assign { line, .. } | Init { line, ..}
+            | If { line, .. } | While { line, .. } | For { line, .. } => *line
         }
     }
 }
@@ -55,26 +64,25 @@ struct GlobalEnv {
 }
 
 impl GlobalEnv {
-    fn new(files: &HashMap<String, Vec<parser::Decl>>) -> Fallible<GlobalEnv> {
-        use parser::Decl::*;
-
+    fn new(files: &HashMap<String, Vec<Decl>>) -> Fallible<GlobalEnv> {
         let mut consts = HashMap::new();
         let mut imports = HashMap::new();
         let mut i = 0;
         for (module_path, decls) in files {
             for decl in decls {
-                if let Const { line, name, private: false, .. } = decl {
+                if let Decl::Const { line, name, private: false, .. } = decl {
+                    builtin_check(*line, name)?;
                     let uniq = format!("_m{}_{}", i, name);
                     let key = (module_path.clone(), name.clone());
                     if consts.insert(key, uniq).is_some() {
                         err(*line, format!("Cannot declare {} twice", name))?;
                     }
-                } else if let Import { line, path, .. } = decl {
+                } else if let Decl::Import { line, path, .. } = decl {
                     let filename = path.split('/').last().unwrap();
                     let ns = filename.replace(".zyba", "");
                     let key = (module_path.clone(), ns.clone());
                     if imports.insert(key, path.clone()).is_some() {
-                        err(*line, format!("Cannot import '{}', duplicate namespace {}", path, ns))?;
+                        err(*line, format!("Duplicate namespace {}", ns))?;
                     }
                 }
             }
@@ -94,8 +102,6 @@ impl Environment for GlobalEnv {
         let key = (module_path.into(), name.into());
         if let Some(uniq) = self.consts.get(&key) {
             Some(uniq.into())
-        } else if is_builtin_function(name) {
-            Some(name.into())
         } else {
             None
         }
@@ -129,12 +135,11 @@ impl<'a> LocalEnv<'a> {
         }
     }
 
-    fn new_module(parent: &'a mut GlobalEnv, module_path: &'a str, decls: &Vec<parser::Decl>) -> Fallible<LocalEnv<'a>> {
-        use parser::Decl::Const;
-
+    fn new_module(parent: &'a mut GlobalEnv, module_path: &'a str, decls: &Vec<Decl>) -> Fallible<LocalEnv<'a>> {
         let mut env = LocalEnv { parent, module_path, locals: HashMap::new() };
         for decl in decls {
-            if let Const { line, name, private: true, .. } = decl {
+            if let Decl::Const { line, name, private: true, .. } = decl {
+                builtin_check(*line, name)?;
                 if env.new_var(name, true).is_none() {
                     err(*line, format!("Cannot declare {} twice", name))?;
                 }
@@ -170,18 +175,16 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn nameres_type(e: parser::Expr) -> Fallible<Type> {
-    use parser::Expr::*;
-
+fn nameres_type(e: Expr) -> Fallible<Type> {
     match e {
-        Var { line, name, .. } => {
-            if is_builtin_type(&name) {
+        Expr::Var { line, name, .. } => {
+            if is_builtin_name(&name) {
                 Ok(Type::Scalar { line, name })
             } else {
                 err(line, format!("Undefined type {}", name))
             }
         },
-        Call { line, func, args } => {
+        Expr::Call { line, func, args } => {
             if let Type::Scalar { name, .. } = nameres_type(*func)? {
                 Ok(Type::Generic {
                     line,
@@ -194,7 +197,7 @@ fn nameres_type(e: parser::Expr) -> Fallible<Type> {
                 err(line, "Repeated brackets in type declaration".into())
             }
         }
-        Record { line, fields } => {
+        Expr::Record { line, fields } => {
             let mut new_fields = HashMap::new();
             for (key, value) in fields {
                 new_fields.insert(key, nameres_type(value)?);
@@ -205,22 +208,23 @@ fn nameres_type(e: parser::Expr) -> Fallible<Type> {
     }
 }
 
-fn nameres_expr(e: parser::Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
-    use parser::Expr::*;
-
+fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
     match e {
-        Int { line, value } => Ok(Value::Int { line, value }),
-        Real { line, value } => Ok(Value::Real { line, value }),
-        Text { line, value } => Ok(Value::Text { line, value }),
-        Bool { line, value } => Ok(Value::Bool { line, value }),
-        Var { line, ns: None, name } => {
+        Expr::Int { line, value } => Ok(Value::Int { line, value }),
+        Expr::Real { line, value } => Ok(Value::Real { line, value }),
+        Expr::Text { line, value } => Ok(Value::Text { line, value }),
+        Expr::Bool { line, value } => Ok(Value::Bool { line, value }),
+        Expr::Var { line, ns: None, name } if is_builtin_name(&name) => {
+            Ok(Value::Var { line, name })
+        }
+        Expr::Var { line, ns: None, name } => {
             if let Some(name) = env.var_name(ns_path, &name) {
                 Ok(Value::Var { line, name })
             } else {
                 err(line, format!("Undefined identifier {}", name))
             }
         }
-        Var { line, ns: Some(ns_name), name } => {
+        Expr::Var { line, ns: Some(ns_name), name } => {
             if let Some(ns_path) = env.ns_path(ns_path, &ns_name) {
                 if let Some(name) = env.var_name(&ns_path, &name) {
                     Ok(Value::Var { line, name })
@@ -231,52 +235,57 @@ fn nameres_expr(e: parser::Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<
                 err(line, format!("Unknown module {}", ns_name))
             }
         }
-        BinOp { line, name, lhs, rhs } => Ok(Value::BinOp {
+        Expr::BinOp { line, name, lhs, rhs } => Ok(Value::BinOp {
             line,
             name,
             lhs: Box::new(nameres_expr(*lhs, ns_path, env)?),
             rhs: Box::new(nameres_expr(*rhs, ns_path, env)?)
         }),
-        Access { line, object, field } => Ok(Value::Access {
+        Expr::Access { line, object, field } => Ok(Value::Access {
             line,
             object: Box::new(nameres_expr(*object, ns_path, env)?),
             field
         }),
-        Call { line, func, args } => Ok(Value::Call {
+        Expr::Call { line, func, args } => Ok(Value::Call {
             line,
             func: Box::new(nameres_expr(*func, ns_path, env)?),
             args: args.into_iter().map(|arg| {
                 nameres_expr(arg, ns_path, env)
             }).collect::<Fallible<Vec<_>>>()?
         }),
-        Record { line, fields } => Ok(Value::Record {
+        Expr::Record { line, fields } => Ok(Value::Record {
             line,
             fields: fields.into_iter().map(|(key, value)| {
                 Ok((key, nameres_expr(value, ns_path, env)?))
             }).collect::<Fallible<HashMap<_, _>>>()?
         }),
-        Lambda { line, args, return_type, body } => {
+        Expr::Lambda { line, args, return_type, body } => {
             let mut inner = LocalEnv::new_scope(env);
-            let args = args.into_iter().map(|(n, t)| {
-                let name = if let Some(name) = inner.new_var(&n, true) {
+            let args = args.into_iter().map(|(name, tpe)| {
+                builtin_check(line, &name)?;
+                let name = if let Some(name) = inner.new_var(&name, true) {
                     name
                 } else {
-                    err(line, format!("Duplicate argument name {}", n))?
+                    err(line, format!("Duplicate argument name {}", name))?
                 };
-                Ok((name, nameres_type(t)?))
+                Ok((name, nameres_type(tpe)?))
             }).collect::<Fallible<Vec<_>>>()?;
 
             let body = nameres_exprs(body, ns_path, inner)?;
             let return_type = nameres_type(*return_type)?;
             Ok(Value::Lambda { line, args, return_type, body })
         }
-        Assign { line, name, expr: value } => {
+        Expr::Assign { line, name, expr: value } => {
+            builtin_check(line, &name)?;
             let value = nameres_expr(*value, ns_path, env)?;
-            env.new_var(&name, false);
-            let name = env.var_name(ns_path, &name).unwrap();
-            Ok(Value::Assign { line, name, value: Box::new(value) })
+            if let Some(name) = env.new_var(&name, false) {
+                Ok(Value::Init { line, name, value: Box::new(value) })
+            } else {
+                let name = env.var_name(ns_path, &name).unwrap();
+                Ok(Value::Assign { line, name, value: Box::new(value) })
+            }
         }
-        If { line, cond, then, elsë } => Ok(Value::If {
+        Expr::If { line, cond, then, elsë } => Ok(Value::If {
             line,
             cond: Box::new(
                 nameres_expr(*cond, ns_path, &mut LocalEnv::new_scope(env))?
@@ -284,21 +293,23 @@ fn nameres_expr(e: parser::Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<
             then: nameres_exprs(then, ns_path, LocalEnv::new_scope(env))?,
             elsë: nameres_exprs(elsë, ns_path, LocalEnv::new_scope(env))?
         }),
-        While { line, cond, body } => Ok(Value::While {
+        Expr::While { line, cond, body } => Ok(Value::While {
             line,
             cond: Box::new(
                 nameres_expr(*cond, ns_path, &mut LocalEnv::new_scope(env))?
             ),
             body: nameres_exprs(body, ns_path, LocalEnv::new_scope(env))?
         }),
-        For { line, key, value, expr, body } => {
+        Expr::For { line, key, value, expr, body } => {
             let expr = nameres_expr(*expr, ns_path, &mut LocalEnv::new_scope(env))?;
             let mut inner = LocalEnv::new_scope(env);
             let key = if let Some(key) = key {
+                builtin_check(line, &key)?;
                 inner.new_var(&key, true).unwrap()
             } else {
                 inner.new_unique_id()
             };
+            builtin_check(line, &value)?;
             let value = if let Some(value) = inner.new_var(&value, true) {
                 value
             } else {
@@ -310,7 +321,7 @@ fn nameres_expr(e: parser::Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<
     }
 }
 
-fn nameres_exprs(exprs: Vec<parser::Expr>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Value>> {
+fn nameres_exprs(exprs: Vec<Expr>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Value>> {
     let mut result = vec![];
     for expr in exprs {
         result.push(nameres_expr(expr, module_path, &mut env)?);
@@ -318,7 +329,7 @@ fn nameres_exprs(exprs: Vec<parser::Expr>, module_path: &str, mut env: LocalEnv)
     Ok(result)
 }
 
-pub fn name_resolution(main: String, modules: HashMap<String, Vec<parser::Decl>>) -> Fallible<(String, HashMap<String, Value>)> {
+pub fn name_resolution(main: String, modules: HashMap<String, Vec<Decl>>) -> Fallible<(String, HashMap<String, Value>)> {
     let mut global_env = GlobalEnv::new(&modules)?;
     let mut result = HashMap::new();
     let mut main_name = None;
@@ -326,7 +337,7 @@ pub fn name_resolution(main: String, modules: HashMap<String, Vec<parser::Decl>>
     for (path, decls) in modules {
         let mut env = LocalEnv::new_module(&mut global_env, &path, &decls)?;
         for decl in decls {
-            if let parser::Decl::Const { name, expr, .. } = decl {
+            if let Decl::Const { name, expr, .. } = decl {
                 let new_name = env.var_name(&path, &name).unwrap();
                 let new_value = nameres_expr(expr, &path, &mut env)?;
 

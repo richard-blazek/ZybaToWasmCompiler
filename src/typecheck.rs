@@ -119,17 +119,20 @@ fn check_var(line: i64, name: String, env: &mut HashMap<String, Type>) -> Fallib
     Ok(Value::Var { line, name, tpe: var_type })
 }
 
+fn check_init(line: i64, name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let value = Box::new(check_value(value, env)?);
+    env.insert(name.clone(), value.tpe());
+    let tpe = value.tpe();
+    Ok(Value::Init { line, name, value, tpe })
+}
+
 fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
-    let value_tpe = value.tpe();
-    if let Some(var_tpe) = env.insert(name.clone(), value_tpe.clone()) {
-        if var_tpe != value_tpe {
-            err(line, format!("Assigning {:?}' to {:?}", value_tpe, var_tpe))?
-        }
-        Ok(Value::Assign { line, name, value, tpe: var_tpe })
-    } else {
-        Ok(Value::Init { line, name, value, tpe: value_tpe })
+    let tpe = env.get(&name).unwrap().clone();
+    if tpe != value.tpe() {
+        err(line, format!("Assigning {:?} to {:?}", value.tpe(), tpe))?
     }
+    Ok(Value::Assign { line, name, value, tpe })
 }
 
 fn check_record(line: i64, fields: HashMap<String, scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -261,6 +264,7 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
         Text { line, value } => check_text(line, value),
         Bool { line, value } => check_bool(line, value),
         Var { line, name } => check_var(line, name, env),
+        Init { line, name, value } => check_init(line, name, *value, env),
         Assign { line, name, value } => check_assign(line, name, *value, env),
         Record { line, fields } => check_record(line, fields, env),
         Access { line, object, field } => check_access(line, *object, field, env),
@@ -269,7 +273,7 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
         For { line, key, value, expr, body } => check_for(line, key, value, *expr, body, env),
         Lambda { line, args, return_type, body } => check_lambda(line, args, return_type, body, env),
         Call { line, func, args } => {
-            if let Var { name, .. } = &*func && is_builtin_function(name) {
+            if let Var { name, .. } = &*func && is_builtin_name(name) {
                 check_builtin_call(line, name.clone(), args, env)
             } else {
                 check_call(line, *func, args, env)
