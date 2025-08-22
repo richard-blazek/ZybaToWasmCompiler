@@ -81,6 +81,11 @@ fn new_state(line: i64, c: char) -> Fallible<State> {
     }
 }
 
+fn add_char(mut s: String, c: char) -> String {
+    s.push(c);
+    s
+}
+
 fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64, State, Vec<Token>)> {
     match state {
         State::Comment if c == '\n' => Ok((cur_line, State::Initial, vec![])),
@@ -99,11 +104,11 @@ fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64,
         State::Text(s, escape) => {
             let state = match (&escape[..], c) {
                 (&[], '\\') => State::Text(s, vec!['\\']),
-                (&[], _) => State::Text(s + &c.to_string(), vec![]),
-                (&['\\'], '\"') => State::Text(s + "\"", vec![]),
-                (&['\\'], '\\') => State::Text(s + "\\", vec![]),
-                (&['\\'], 'n') => State::Text(s + "\n", vec![]),
-                (&['\\'], 't') => State::Text(s + "\t", vec![]),
+                (&[], _) => State::Text(add_char(s, c), vec![]),
+                (&['\\'], '\"') => State::Text(add_char(s, '"'), vec![]),
+                (&['\\'], '\\') => State::Text(add_char(s, '\\'), vec![]),
+                (&['\\'], 'n') => State::Text(add_char(s, '\n'), vec![]),
+                (&['\\'], 't') => State::Text(add_char(s, '\t'), vec![]),
                 (&['\\'], 'x') => State::Text(s, vec!['\\', 'x']),
                 (&['\\', 'x'], _) => {
                     if !c.is_digit(16) {
@@ -116,7 +121,7 @@ fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64,
                         err(cur_line, format!("{} is not a hex digit", c))?;
                     }
                     let ord = (parse_digit(d) * 16 + parse_digit(c)) as char;
-                    State::Text(s + &ord.to_string(), vec![])
+                    State::Text(add_char(s, ord), vec![])
                 }
                 _ => err(cur_line, format!("Invalid escape {}", c))?
             };
@@ -162,7 +167,7 @@ fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64,
         }
         State::Name(name) => {
             if is_alnum(c) {
-                Ok((cur_line, State::Name(name + &c.to_string()), vec![]))
+                Ok((cur_line, State::Name(add_char(name, c)), vec![]))
             } else {
                 Ok((
                     cur_line,
@@ -173,7 +178,7 @@ fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64,
         }
         State::Operator(name) => {
             if is_operator(c) {
-                Ok((cur_line, State::Operator(name + &c.to_string()), vec![]))
+                Ok((cur_line, State::Operator(add_char(name, c)), vec![]))
             } else {
                 Ok((
                     cur_line,
