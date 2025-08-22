@@ -14,15 +14,29 @@ pub enum Token {
 
 impl Token {
     pub fn line(&self) -> i64 {
+        use Token::*;
         match self {
-            Token::Real { line, .. } => *line,
-            Token::Int { line, .. } => *line,
-            Token::Text { line, .. } => *line,
-            Token::Bool { line, .. } => *line,
-            Token::Operator { line, .. } => *line,
-            Token::Separator { line, .. } => *line,
-            Token::Name { line, .. } => *line,
-            Token::Eof { line } => *line,
+            Real { line, .. } | Int { line, .. } | Text { line, ..}
+            | Bool { line, .. } | Operator { line, .. } | Eof { line }
+            | Separator { line, .. } | Name { line, .. } => *line
+        }
+    }
+
+    fn int(line: i64, value: u128) -> Token {
+        Token::Int { line, value: value as i64 }
+    }
+
+    fn real(line: i64, radix: u32, mantissa: u128, exp: u32) -> Token {
+        let value = mantissa as f64 / (radix as f64).powi(exp as i32);
+        Token::Real { line, value }
+    }
+
+    fn name(line: i64, name: String) -> Token {
+        if name == "true" || name == "false" {
+            let value = name == "true";
+            Token::Bool { line, value }
+        } else {
+            Token::Name { line, name }
         }
     }
 }
@@ -32,19 +46,14 @@ enum State {
     Comment,
     Real(u32, u128, u32),
     Int(u32, u128),
-    Text(String, Option<String>),
+    Text(String, Vec<char>),
     Separator(char),
     Operator(String),
     Name(String),
 }
 
 fn parse_digit(c: char) -> u8 {
-    match c {
-        '0'..='9' => c as u8 - '0' as u8,
-        'A'..='Z' => 10 + (c as u8 - 'A' as u8),
-        'a'..='z' => 10 + (c as u8 - 'a' as u8),
-        _ => 36,
-    }
+    c.to_digit(36).unwrap_or(36) as u8
 }
 
 fn is_alnum(c: char) -> bool {
@@ -61,7 +70,7 @@ fn is_separator(c: char) -> bool {
 
 fn new_state(line: i64, c: char) -> Fallible<State> {
     match c {
-        '"' => Ok(State::Text(String::new(), None)),
+        '"' => Ok(State::Text(String::new(), vec![])),
         '#' => Ok(State::Comment),
         c if c.is_digit(10) => Ok(State::Int(10, parse_digit(c) as u128)),
         c if c.is_ascii_alphabetic() => Ok(State::Name(c.to_string())),
@@ -72,145 +81,104 @@ fn new_state(line: i64, c: char) -> Fallible<State> {
     }
 }
 
-fn real_token(line: i64, radix: u32, mantissa: u128, exp: u32) -> Token {
-    Token::Real {
-        line: line,
-        value: mantissa as f64 / (radix as f64).powi(exp as i32),
-    }
-}
-
-fn name_token(line: i64, name: String) -> Token {
-    if name == "true" || name == "false" {
-        Token::Bool {
-            line: line,
-            value: name == "true",
-        }
-    } else {
-        Token::Name { line, name }
-    }
-}
-
-fn process_char(c: char, state: State, start_line: i64, current_line: i64) -> Fallible<(i64, State, Vec<Token>)> {
+fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64, State, Vec<Token>)> {
     match state {
-        State::Comment => Ok((
-            current_line,
-            if c == '\n' {
-                State::Initial
-            } else {
-                State::Comment
-            },
-            vec![],
-        )),
-        State::Initial => Ok((current_line, new_state(start_line, c)?, vec![])),
+        State::Comment if c == '\n' => Ok((cur_line, State::Initial, vec![])),
+        State::Comment => Ok((cur_line, State::Comment, vec![])),
+        State::Initial => {
+            Ok((cur_line, new_state(start_line, c)?, vec![]))
+        }
         State::Separator(s) => {
-            let token = Token::Separator {
-                line: start_line,
-                name: s,
-            };
-            Ok((current_line, new_state(start_line, c)?, vec![token]))
+            let token = Token::Separator { line: start_line, name: s };
+            Ok((cur_line, new_state(start_line, c)?, vec![token]))
         }
-        State::Text(s, None) => {
-            if c == '\\' {
-                Ok((start_line, State::Text(s, Some("".to_string())), vec![]))
-            } else if c == '"' {
-                Ok((
-                    current_line,
-                    State::Initial,
-                    vec![Token::Text {
-                        line: start_line,
-                        value: s,
-                    }],
-                ))
-            } else {
-                Ok((
-                    start_line,
-                    State::Text(s + c.to_string().as_str(), None),
-                    vec![],
-                ))
-            }
+        State::Text(s, escape) if escape.is_empty() && c == '"' => {
+            let token = Token::Text { line: start_line, value: s };
+            Ok((cur_line, State::Initial, vec![token]))
         }
-        State::Text(s, Some(escape)) => {
-            let state = match (escape.chars().nth(0), escape.chars().nth(1), c) {
-                (None, None, '\"') => State::Text(s + "\"", None),
-                (None, None, '\\') => State::Text(s + "\\", None),
-                (None, None, 'n') => State::Text(s + "\n", None),
-                (None, None, 't') => State::Text(s + "\t", None),
-                (None, None, 'x') => State::Text(s, Some("x".to_string())),
-                (Some('x'), None, _) if c.is_digit(16) => {
-                    State::Text(s, Some(String::from_iter(['x', c])))
+        State::Text(s, escape) => {
+            let state = match (&escape[..], c) {
+                (&[], '\\') => State::Text(s, vec!['\\']),
+                (&[], _) => State::Text(s + &c.to_string(), vec![]),
+                (&['\\'], '\"') => State::Text(s + "\"", vec![]),
+                (&['\\'], '\\') => State::Text(s + "\\", vec![]),
+                (&['\\'], 'n') => State::Text(s + "\n", vec![]),
+                (&['\\'], 't') => State::Text(s + "\t", vec![]),
+                (&['\\'], 'x') => State::Text(s, vec!['\\', 'x']),
+                (&['\\', 'x'], _) => {
+                    if !c.is_digit(16) {
+                        err(cur_line, format!("{} is not a hex digit", c))?;
+                    }
+                    State::Text(s, vec!['\\', 'x', c])
                 }
-                (Some('x'), Some(d), _) if c.is_digit(16) && d.is_digit(16) => {
+                (&['\\', 'x', d], _) => {
+                    if !c.is_digit(16) {
+                        err(cur_line, format!("{} is not a hex digit", c))?;
+                    }
                     let ord = (parse_digit(d) * 16 + parse_digit(c)) as char;
-                    State::Text(s + ord.to_string().as_str(), None)
+                    State::Text(s + &ord.to_string(), vec![])
                 }
-                _ => err(current_line, format!("Invalid escape \\{}{}", escape, c))?
+                _ => err(cur_line, format!("Invalid escape {}", c))?
             };
             Ok((start_line, state, vec![]))
         }
-        State::Int(radix, n) if c == '.' => Ok((current_line, State::Real(radix, n, 0), vec![])),
+        State::Int(radix, n) if c == '.' => {
+            Ok((cur_line, State::Real(radix, n, 0), vec![]))
+        }
         State::Int(radix, n) if c == 'r' => {
             if radix != 10 {
-                err(current_line, "Specifying radix twice".to_string())?;
+                err(cur_line, "Specifying radix twice".into())?;
             }
             if n < 2 || n > 36 {
-                err(current_line, "Radix must be between 2 and 36".to_string())?;
+                err(cur_line, "Radix must be between 2 and 36".into())?;
             }
-            Ok((current_line, State::Int(n as u32, 0), vec![]))
+            Ok((cur_line, State::Int(n as u32, 0), vec![]))
         }
         State::Int(radix, n) if c.is_ascii_alphanumeric() => {
             if !c.is_digit(radix) {
-                err(current_line, format!("Digit {} is not valid in a {}-base number", c, radix))?;
+                err(cur_line, format!("{} is not a {}-base digit", c, radix))?;
             }
             let new_n = n * radix as u128 + parse_digit(c) as u128;
             if new_n > i64::MAX as u128 {
-                err(current_line, format!("Number too large, maximal value is {}", i64::MAX))?;
+                err(cur_line, "Value too large to fit in 64 bits".into())?;
             }
-            Ok((current_line, State::Int(radix, new_n), vec![]))
+            Ok((cur_line, State::Int(radix, new_n), vec![]))
         }
         State::Int(_, n) => {
-            let token = Token::Int {
-                line: start_line,
-                value: n as i64,
-            };
-            Ok((current_line, new_state(start_line, c)?, vec![token]))
+            let token = Token::int(start_line, n);
+            Ok((cur_line, new_state(start_line, c)?, vec![token]))
         }
         State::Real(radix, n, exp) => {
             if c.is_digit(radix) {
-                Ok((
-                    current_line,
-                    State::Real(radix, n * radix as u128 + parse_digit(c) as u128, exp + 1),
-                    vec![],
-                ))
+                let n = n * radix as u128 + parse_digit(c) as u128;
+                Ok((cur_line, State::Real(radix, n, exp + 1), vec![]))
             } else {
                 Ok((
-                    current_line,
+                    cur_line,
                     new_state(start_line, c)?,
-                    vec![real_token(start_line, radix, n, exp)],
+                    vec![Token::real(start_line, radix, n, exp)],
                 ))
             }
         }
         State::Name(name) => {
             if is_alnum(c) {
-                Ok((current_line, State::Name(name + c.to_string().as_str()), vec![]))
+                Ok((cur_line, State::Name(name + &c.to_string()), vec![]))
             } else {
                 Ok((
-                    current_line,
+                    cur_line,
                     new_state(start_line, c)?,
-                    vec![name_token(start_line, name)],
+                    vec![Token::name(start_line, name)],
                 ))
             }
         }
         State::Operator(name) => {
             if is_operator(c) {
-                Ok((current_line, State::Operator(name + c.to_string().as_str()), vec![]))
+                Ok((cur_line, State::Operator(name + &c.to_string()), vec![]))
             } else {
                 Ok((
-                    current_line,
+                    cur_line,
                     new_state(start_line, c)?,
-                    vec![Token::Operator {
-                        line: start_line,
-                        name: name,
-                    }],
+                    vec![Token::Operator { line: start_line, name }],
                 ))
             }
         }
@@ -226,20 +194,20 @@ pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
     for c in input.chars() {
         line += if c == '\n' { 1 } else { 0 };
 
-        let (new_line, new_state, new_tokens) = process_char(c, state, token_line, line)?;
-        token_line = new_line;
-        state = new_state;
+        let (ln, st, new_tokens) = next(c, state, token_line, line)?;
+        token_line = ln;
+        state = st;
         tokens.extend(new_tokens);
     }
 
     match state {
         State::Initial | State::Comment => (),
-        State::Real(r, n, exp) => tokens.push(real_token(line, r, n, exp)),
-        State::Int(_, value) => tokens.push(Token::Int { line, value: value as i64 }),
+        State::Real(r, n, exp) => tokens.push(Token::real(line, r, n, exp)),
+        State::Int(_, value) => tokens.push(Token::int(line, value)),
         State::Separator(name) => tokens.push(Token::Separator { line, name }),
         State::Operator(name) => tokens.push(Token::Operator { line, name }),
-        State::Name(name) => tokens.push(name_token(line, name)),
-        State::Text(_, _) => err(token_line, "Text not closed".to_string())?,
+        State::Name(name) => tokens.push(Token::name(line, name)),
+        State::Text(_, _) => err(line, "Text literal not closed".into())?
     }
 
     tokens.push(Token::Eof { line });
