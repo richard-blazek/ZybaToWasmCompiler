@@ -9,6 +9,8 @@ mod loader;
 mod builtin;
 mod typecheck;
 
+mod highlevel_ir;
+
 fn main() {
     let mut files = HashMap::new();
     files.insert("math.zyba".to_string(), "

@@ -1,3 +1,5 @@
+use crate::builtin::Type;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cmp {
     Lt, Lte, Eq, Gte, Gt, Neq
