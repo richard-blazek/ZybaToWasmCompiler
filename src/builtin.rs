@@ -209,10 +209,14 @@ pub fn apply_builtin_op(name: &str, lhs: Type, rhs: Type) -> Option<Type> {
 
         ("&", Int, Int) => Some(Int),
         ("&", Bool, Bool) => Some(Bool),
-        ("|", Int, Int) => Some(Int),
-        ("|", Bool, Bool) => Some(Bool),
         ("^", Int, Int) => Some(Int),
         ("^", Bool, Bool) => Some(Bool),
+        ("|", Int, Int) => Some(Int),
+        ("|", Bool, Bool) => Some(Bool),
+
+        ("|", Record { fields: f1 }, Record { fields: f2 }) => Some(Record {
+            fields: f1.into_iter().chain(f2).collect(),
+        }),
 
         _ => None
     }
