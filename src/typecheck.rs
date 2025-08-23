@@ -6,21 +6,21 @@ use crate::scope;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Int { line: i64, value: i64, tpe: Type },
-    Real { line: i64, value: f64, tpe: Type },
-    Text { line: i64, value: String, tpe: Type },
-    Bool { line: i64, value: bool, tpe: Type },
-    Record { line: i64, fields: HashMap<String, Value>, tpe: Type },
-    Var { line: i64, name: String, tpe: Type },
-    Call { line: i64, func: Box<Value>, args: Vec<Value>, tpe: Type },
-    Builtin { line: i64, op: String, args: Vec<Value>, tpe: Type },
-    Access { line: i64, object: Box<Value>, field: String, tpe: Type },
-    Lambda { line: i64, args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
-    Init { line: i64, name: String, value: Box<Value>, tpe: Type },
-    Assign { line: i64, name: String, value: Box<Value>, tpe: Type },
-    If { line: i64, cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value>, tpe: Type },
-    While { line: i64, cond: Box<Value>, body: Vec<Value>, tpe: Type },
-    For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value>, tpe: Type },
+    Int { value: i64, tpe: Type },
+    Real { value: f64, tpe: Type },
+    Text { value: String, tpe: Type },
+    Bool { value: bool, tpe: Type },
+    Record { fields: HashMap<String, Value>, tpe: Type },
+    Var { name: String, tpe: Type },
+    Call { func: Box<Value>, args: Vec<Value>, tpe: Type },
+    Builtin { op: String, args: Vec<Value>, tpe: Type },
+    Access { object: Box<Value>, field: String, tpe: Type },
+    Lambda { args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
+    Init { name: String, value: Box<Value>, tpe: Type },
+    Assign { name: String, value: Box<Value>, tpe: Type },
+    If { cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value>, tpe: Type },
+    While { cond: Box<Value>, body: Vec<Value>, tpe: Type },
+    For { key: String, value: String, expr: Box<Value>, body: Vec<Value>, tpe: Type },
 }
 
 impl Value {
@@ -92,32 +92,32 @@ fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<Strin
     Ok(env)
 }
 
-fn check_int(line: i64, value: i64) -> Fallible<Value> {
-    Ok(Value::Int { line, value, tpe: Type::Int })
+fn check_int(value: i64) -> Fallible<Value> {
+    Ok(Value::Int { value, tpe: Type::Int })
 }
 
-fn check_real(line: i64, value: f64) -> Fallible<Value> {
-    Ok(Value::Real { line, value, tpe: Type::Real })
+fn check_real(value: f64) -> Fallible<Value> {
+    Ok(Value::Real { value, tpe: Type::Real })
 }
 
-fn check_text(line: i64, value: String) -> Fallible<Value> {
-    Ok(Value::Text { line, value, tpe: Type::Text })
+fn check_text(value: String) -> Fallible<Value> {
+    Ok(Value::Text { value, tpe: Type::Text })
 }
 
-fn check_bool(line: i64, value: bool) -> Fallible<Value> {
-    Ok(Value::Bool { line, value, tpe: Type::Bool })
+fn check_bool(value: bool) -> Fallible<Value> {
+    Ok(Value::Bool { value, tpe: Type::Bool })
 }
 
-fn check_var(line: i64, name: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_var(name: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let var_type = env.get(&name).unwrap().clone();
-    Ok(Value::Var { line, name, tpe: var_type })
+    Ok(Value::Var { name, tpe: var_type })
 }
 
-fn check_init(line: i64, name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_init(name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
     env.insert(name.clone(), value.tpe());
     let tpe = value.tpe();
-    Ok(Value::Init { line, name, value, tpe })
+    Ok(Value::Init { name, value, tpe })
 }
 
 fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -126,10 +126,10 @@ fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<
     if tpe != value.tpe() {
         err(line, format!("Assigning {} to {}", value.tpe(), tpe))?
     }
-    Ok(Value::Assign { line, name, value, tpe })
+    Ok(Value::Assign { name, value, tpe })
 }
 
-fn check_record(line: i64, fields: HashMap<String, scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_record(fields: HashMap<String, scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let fields = fields.into_iter().map(|(name, value)| {
         Ok((name, check_value(value, env)?))
     }).collect::<Fallible<HashMap<_, _>>>()?;
@@ -138,14 +138,14 @@ fn check_record(line: i64, fields: HashMap<String, scope::Value>, env: &mut Hash
             (name.clone(), value.tpe())
         }).collect()
     };
-    Ok(Value::Record { line, fields, tpe: record_tpe })
+    Ok(Value::Record { fields, tpe: record_tpe })
 }
 
 fn check_access(line: i64, object: scope::Value, field: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let object = Box::new(check_value(object, env)?);
     if let Type::Record { fields } = object.tpe() {
         if let Some(field_tpe) = fields.get(&field) {
-            Ok(Value::Access { line, object, field, tpe: field_tpe.clone() })
+            Ok(Value::Access { object, field, tpe: field_tpe.clone() })
         } else {
             err(line, format!("Record does not have a field {}", field))
         }
@@ -154,7 +154,7 @@ fn check_access(line: i64, object: scope::Value, field: String, env: &mut HashMa
     }
 }
 
-fn check_if(line: i64, cond: scope::Value, then: Vec<scope::Value>, elsë: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_if(cond: scope::Value, then: Vec<scope::Value>, elsë: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
     let then = then.into_iter().map(|v| {
         check_value(v, env)
@@ -169,16 +169,16 @@ fn check_if(line: i64, cond: scope::Value, then: Vec<scope::Value>, elsë: Vec<s
     } else {
         Type::Record { fields: HashMap::new() }
     };
-    Ok(Value::If { line, cond, then, elsë, tpe })
+    Ok(Value::If { cond, then, elsë, tpe })
 }
 
-fn check_while(line: i64, cond: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_while(cond: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
     let body = body.into_iter().map(|v| {
         check_value(v, env)
     }).collect::<Fallible<Vec<_>>>()?;
     let tpe = Type::Record { fields: HashMap::new() };
-    Ok(Value::While { line, cond, body, tpe })
+    Ok(Value::While { cond, body, tpe })
 }
 
 fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -196,7 +196,7 @@ fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Ve
         check_value(v, env)
     }).collect::<Fallible<Vec<_>>>()?;
     let tpe = Type::Record { fields: HashMap::new() };
-    Ok(Value::For { line, key, value, expr, body, tpe })
+    Ok(Value::For { key, value, expr, body, tpe })
 }
 
 fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -217,7 +217,7 @@ fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope
     let body_t = body.last().map(Value::tpe).unwrap_or(void.clone());
 
     if return_type == body_t || return_type == void {
-        Ok(Value::Lambda { line, args, return_type, body, tpe })
+        Ok(Value::Lambda { args, return_type, body, tpe })
     } else {
         err(line, format!("Return type is {}, but the function returns {}", return_type, body_t))
     }
@@ -236,7 +236,7 @@ fn check_call(line: i64, func: scope::Value, args: Vec<scope::Value>, env: &mut 
             }
             Ok(v)
         }).collect::<Fallible<Vec<_>>>()?;
-        Ok(Value::Call { line, func, args, tpe: *return_type })
+        Ok(Value::Call { func, args, tpe: *return_type })
     } else {
         err(line, format!("{} is not a function", func.tpe()))?
     }
@@ -252,7 +252,7 @@ fn check_builtin_call(line: i64, builtin: String, args: Vec<scope::Value>, env: 
     let arg_types = args.iter().map(Value::tpe).collect::<Vec<_>>();
 
     if let Some(tpe) = apply_builtin_fn(&builtin, &type_args, &arg_types) {
-        Ok(Value::Builtin { line, op: builtin, args, tpe })
+        Ok(Value::Builtin { op: builtin, args, tpe })
     } else {
         let arg_str = type_args.iter().chain(arg_types.iter()).map(|t| {
             format!("{}", t)
@@ -265,7 +265,7 @@ fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, e
     let lhs = check_value(lhs, env)?;
     let rhs = check_value(rhs, env)?;
     if let Some(tpe) = apply_builtin_op(&name, lhs.tpe(), rhs.tpe()) {
-        Ok(Value::Builtin { line, op: name, args: vec![lhs, rhs], tpe })
+        Ok(Value::Builtin { op: name, args: vec![lhs, rhs], tpe })
     } else {
         err(line, format!("Operator {} does not accept {} and {}", name, lhs.tpe(), rhs.tpe()))
     }
@@ -274,17 +274,17 @@ fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, e
 fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     use scope::Value::*;
     match value {
-        Int { line, value } => check_int(line, value),
-        Real { line, value } => check_real(line, value),
-        Text { line, value } => check_text(line, value),
-        Bool { line, value } => check_bool(line, value),
-        Var { line, name } => check_var(line, name, env),
-        Init { line, name, value } => check_init(line, name, *value, env),
+        Int { value, .. } => check_int(value),
+        Real { value, .. } => check_real(value),
+        Text { value, .. } => check_text(value),
+        Bool { value, .. } => check_bool(value),
+        Var { name, .. } => check_var(name, env),
+        Init { name, value, .. } => check_init(name, *value, env),
         Assign { line, name, value } => check_assign(line, name, *value, env),
-        Record { line, fields } => check_record(line, fields, env),
+        Record { fields, .. } => check_record(fields, env),
         Access { line, object, field } => check_access(line, *object, field, env),
-        If { line, cond, then, elsë } => check_if(line, *cond, then, elsë, env),
-        While { line, cond, body } => check_while(line, *cond, body, env),
+        If { cond, then, elsë, .. } => check_if(*cond, then, elsë, env),
+        While { cond, body, .. } => check_while(*cond, body, env),
         For { line, key, value, expr, body } => check_for(line, key, value, *expr, body, env),
         Lambda { line, args, return_type, body } => check_lambda(line, args, *return_type, body, env),
         Call { line, func, args } => {
