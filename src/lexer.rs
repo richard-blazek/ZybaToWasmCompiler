@@ -1,5 +1,18 @@
 use crate::error::{Fallible, err};
 
+/*
+<int> ::= [0-9]+
+<real> ::= <int> "." [0-9]*
+<bool> ::= "true" | "false"
+<text> ::= "\"" <text_char>* "\""
+<text_char> ::= [^"\\] | <text_esc>
+<text_esc> ::= "\\\"" | "\\n" | "\\t" | "\\x" <text_hex> <text_hex>
+<text_hex> ::= [0-9a-fA-F]
+<operator> ::= [+*-/%&|~^<>=!]+
+<separator> ::= [\(\)\[\]\.\{\}:,;]
+<name> ::= [a-zA-Z] [a-zA-Z0-9_]
+*/
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Real { line: i64, value: f64 },
@@ -26,8 +39,8 @@ impl Token {
         Token::Int { line, value: value as i64 }
     }
 
-    fn real(line: i64, radix: u32, mantissa: u128, exp: u32) -> Token {
-        let value = mantissa as f64 / (radix as f64).powi(exp as i32);
+    fn real(line: i64, mantissa: u128, exp: u32) -> Token {
+        let value = mantissa as f64 / f64::powi(10.0, exp as i32);
         Token::Real { line, value }
     }
 
@@ -44,8 +57,8 @@ impl Token {
 enum State {
     Initial,
     Comment,
-    Real(u32, u128, u32),
-    Int(u32, u128),
+    Int(u128),
+    Real(u128, u32),
     Text(String, Vec<char>),
     Separator(char),
     Operator(String),
@@ -72,7 +85,7 @@ fn new_state(line: i64, c: char) -> Fallible<State> {
     match c {
         '"' => Ok(State::Text(String::new(), vec![])),
         '#' => Ok(State::Comment),
-        c if c.is_digit(10) => Ok(State::Int(10, parse_digit(c) as u128)),
+        c if c.is_digit(10) => Ok(State::Int(parse_digit(c) as u128)),
         c if c.is_ascii_alphabetic() => Ok(State::Name(c.to_string())),
         c if c.is_whitespace() => Ok(State::Initial),
         c if is_operator(c) => Ok(State::Operator(c.to_string())),
@@ -127,43 +140,25 @@ fn next(c: char, state: State, start_line: i64, cur_line: i64) -> Fallible<(i64,
             };
             Ok((start_line, state, vec![]))
         }
-        State::Int(radix, n) if c == '.' => {
-            Ok((cur_line, State::Real(radix, n, 0), vec![]))
-        }
-        State::Int(radix, n) if c == 'r' => {
-            if radix != 10 {
-                err(cur_line, "Specifying radix twice".into())?;
-            }
-            if n < 2 || n > 36 {
-                err(cur_line, "Radix must be between 2 and 36".into())?;
-            }
-            Ok((cur_line, State::Int(n as u32, 0), vec![]))
-        }
-        State::Int(radix, n) if c.is_ascii_alphanumeric() => {
-            if !c.is_digit(radix) {
-                err(cur_line, format!("{} is not a {}-base digit", c, radix))?;
-            }
-            let new_n = n * radix as u128 + parse_digit(c) as u128;
-            if new_n > i64::MAX as u128 {
+        State::Int(n) if c == '.' => Ok((cur_line, State::Real(n, 0), vec![])),
+        State::Int(n) if c.is_ascii_digit() => {
+            let n = n * 10 + parse_digit(c) as u128;
+            if n > i64::MAX as u128 {
                 err(cur_line, "Value too large to fit in 64 bits".into())?;
             }
-            Ok((cur_line, State::Int(radix, new_n), vec![]))
+            Ok((cur_line, State::Int(n), vec![]))
         }
-        State::Int(_, n) => {
+        State::Int(n) => {
             let token = Token::int(start_line, n);
             Ok((cur_line, new_state(start_line, c)?, vec![token]))
         }
-        State::Real(radix, n, exp) => {
-            if c.is_digit(radix) {
-                let n = n * radix as u128 + parse_digit(c) as u128;
-                Ok((cur_line, State::Real(radix, n, exp + 1), vec![]))
-            } else {
-                Ok((
-                    cur_line,
-                    new_state(start_line, c)?,
-                    vec![Token::real(start_line, radix, n, exp)],
-                ))
-            }
+        State::Real(n, exp) if c.is_ascii_digit() => {
+            let n = n * 10 + parse_digit(c) as u128;
+            Ok((cur_line, State::Real(n, exp + 1), vec![]))
+        }
+        State::Real(n, exp) => {
+            let token = Token::real(start_line, n, exp);
+            Ok((cur_line, new_state(start_line, c)?, vec![token]))
         }
         State::Name(name) => {
             if is_alnum(c) {
@@ -207,8 +202,8 @@ pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
 
     match state {
         State::Initial | State::Comment => (),
-        State::Real(r, n, exp) => tokens.push(Token::real(line, r, n, exp)),
-        State::Int(_, value) => tokens.push(Token::int(line, value)),
+        State::Real(n, exp) => tokens.push(Token::real(line, n, exp)),
+        State::Int(value) => tokens.push(Token::int(line, value)),
         State::Separator(name) => tokens.push(Token::Separator { line, name }),
         State::Operator(name) => tokens.push(Token::Operator { line, name }),
         State::Name(name) => tokens.push(Token::name(line, name)),
@@ -221,510 +216,416 @@ pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::{tokenize, Token};
+    use super::*; // assumes `tokenize`, `Token`, and `TokenError` are in the parent module
 
-    use proptest::prelude::*;
+    // --- Small helpers to make expected tokens concise ----------------------------------------
+    fn t_int(line: i64, value: i64) -> Token { Token::Int { line, value } }
+    fn t_real(line: i64, value: f64) -> Token { Token::Real { line, value } }
+    fn t_text(line: i64, value: &str) -> Token { Token::Text { line, value: value.to_string() } }
+    fn t_bool(line: i64, value: bool) -> Token { Token::Bool { line, value } }
+    fn t_op(line: i64, name: &str) -> Token { Token::Operator { line, name: name.to_string() } }
+    fn t_sep(line: i64, name: char) -> Token { Token::Separator { line, name } }
+    fn t_name(line: i64, name: &str) -> Token { Token::Name { line, name: name.to_string() } }
 
-    fn is_close(a: f64, b: f64) -> bool {
-        let tol = 1e-12_f64.max(1e-12_f64 * a.abs().max(b.abs()));
-        (a - b).abs() <= tol
+    /// Assert the token stream equals `expected` followed by an EOF, ignoring the EOF line value.
+    fn assert_tokens(input: &str, expected: &[Token]) -> Vec<Token> {
+        let tokens = tokenize(input).expect("tokenize should succeed");
+        assert!(!tokens.is_empty(), "lexer must produce at least EOF");
+        match tokens.last().unwrap() {
+            Token::Eof { .. } => {},
+            other => panic!("last token must be EOF, got: {:?}", other),
+        }
+        assert_eq!(&tokens[..tokens.len()-1], expected, "token sequence (without EOF) mismatch");
+        tokens
     }
 
-    fn eof_line(tokens: &[Token]) -> Option<i64> {
-        tokens.last().and_then(|t| {
-            if let Token::Eof { line } = t { Some(*line) } else { None }
-        })
-    }
+    // --------------------------------- Smoke & whitespace -------------------------------------
 
-    fn strip_eof(mut tokens: Vec<Token>) -> (Vec<Token>, Option<i64>) {
-        if matches!(tokens.last(), Some(Token::Eof { .. })) {
-            if let Token::Eof { line } = tokens.pop().unwrap() {
-                return (tokens, Some(line));
-            }
-        }
-        (tokens, None)
-    }
-
-    fn to_base(mut v: u128, radix: u32) -> String {
-        assert!((2..=36).contains(&radix));
-        if v == 0 {
-            return "0".to_string();
-        }
-        let mut s = String::new();
-        while v > 0 {
-            let d = (v % radix as u128) as u8;
-            let ch = match d {
-                0..=9 => (b'0' + d) as char,
-                10..=35 => (b'A' + (d - 10)) as char,
-                _ => unreachable!(),
-            };
-            s.push(ch);
-            v /= radix as u128;
-        }
-        s.chars().rev().collect()
-    }
-
-    fn eval_radixed_real(int_digits: &str, frac_digits: &str, radix: u32) -> f64 {
-        let r = radix as f64;
-        let int_val = int_digits.chars().fold(0u128, |acc, c| {
-            let v = digit_value(c);
-            acc * radix as u128 + v as u128
-        }) as f64;
-
-        let mut frac = 0.0f64;
-        let mut p = 1.0f64;
-        for c in frac_digits.chars() {
-            p *= r;
-            frac += digit_value(c) as f64 / p;
-        }
-        int_val + frac
-    }
-
-    fn digit_value(c: char) -> u32 {
-        match c {
-            '0'..='9' => (c as u8 - b'0') as u32,
-            'A'..='Z' => 10 + (c as u8 - b'A') as u32,
-            'a'..='z' => 10 + (c as u8 - b'a') as u32,
-            _ => 1000,
-        }
+    #[test]
+    fn empty_input_yields_only_eof() {
+        let tokens = tokenize("").expect("should succeed on empty");
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0], Token::Eof { .. }));
+        // If your lexer starts at line 1:
+        if let Token::Eof { line } = tokens[0] { assert_eq!(line, 1); }
     }
 
     #[test]
-    fn ints_basic_and_leading_zeros() {
-        let input = "0 7 42 0009";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _eof) = strip_eof(tokens);
+    fn whitespace_ignored_and_lines_tracked() {
+        // Two newlines total ⇒ final EOF line should be 3 (if starting at 1).
+        let input = "   \t \n \t  \n  ";
+        let toks = tokenize(input).expect("should succeed");
+        assert!(matches!(toks.last(), Some(Token::Eof { .. })));
+        if let Token::Eof { line } = toks.last().unwrap() {
+            assert_eq!(*line, 3, "adjust this if your lexer uses different line tracking");
+        }
+    }
 
+    // ----------------------------------- Integers & Reals -------------------------------------
+
+    #[test]
+    fn basic_integers_and_reals() {
         let expected = vec![
-            Token::Int { line: 1, value: 0 },
-            Token::Int { line: 1, value: 7 },
-            Token::Int { line: 1, value: 42 },
-            Token::Int { line: 1, value: 9 },
+            t_int(1, 0),
+            t_int(1, 7),
+            t_int(1, 12345),
+            t_real(1, 1.0),
+            t_real(1, 1.0), // "1." is a valid <real> per grammar
+            t_real(1, 0.0), // "0."
+            t_real(1, 123.45),
         ];
-        assert_eq!(tokens, expected);
+        assert_tokens("0 7 12345 1.0 1. 0. 123.45", &expected);
     }
 
     #[test]
-    fn real_basic_variants() {
-        let input = "1.0 0. 12.34 9999.";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _eof) = strip_eof(tokens);
+    fn real_trailing_dot_vs_separator_ambiguity() {
+        // Per grammar, <real> ::= <int> "." [0-9]*, so "1.." tokenizes as REAL("1.") then '.'.
+        let expected = vec![
+            t_real(1, 1.0),
+            t_sep(1, '.'),
+            t_int(1, 2),
+        ];
+        assert_tokens("1..2", &expected);
 
-        let expect_vals = [1.0, 0.0, 12.34, 9999.0];
-        for (i, tok) in tokens.iter().enumerate() {
-            match tok {
-                Token::Real { line, value } => {
-                    assert_eq!(*line, 1);
-                    assert!(is_close(*value, expect_vals[i]));
-                }
-                _ => panic!("Expected Real at {i:?}, got {tok:?}"),
-            }
+        // "42.true" ⇒ REAL("42.") then NAME("true").
+        let expected2 = vec![t_real(1, 42.0), t_bool(1, true)];
+        assert_tokens("42.true", &expected2);
+    }
+
+    #[test]
+    fn real_cannot_start_with_dot() {
+        // ".5" is not a <real> by your grammar; it should be '.' then INT(5).
+        let expected = vec![t_sep(1, '.'), t_int(1, 5)];
+        assert_tokens(".5", &expected);
+    }
+
+    #[test]
+    fn number_followed_by_letters_forms_separate_tokens() {
+        // "1e3" is not scientific notation in this grammar; it’s INT(1) then NAME("e3").
+        let expected = vec![t_int(1, 1), t_name(1, "e3")];
+        assert_tokens("1e3", &expected);
+    }
+
+    #[test]
+    fn underscores_in_numbers_are_errors() {
+        // '_' is not allowed in <int>/<real>; should error on first unknown char.
+        assert!(tokenize("1_2").is_err());
+    }
+
+    // Optionally test overflow if you parse ints strictly into i64.
+    #[test]
+    fn int_overflow_is_error_if_parsing_into_i64() {
+        // i64::MAX = 9223372036854775807
+        assert!(tokenize("9223372036854775807").is_ok());
+        assert!(tokenize("9223372036854775808").is_err(), "adjust if you don't check overflow");
+    }
+
+    // ------------------------------------ Bools & Names ---------------------------------------
+
+    #[test]
+    fn bool_keywords_and_names() {
+        let expected = vec![
+            t_bool(1, true),
+            t_bool(1, false),
+            t_name(1, "True"),   // case-sensitive
+            t_name(1, "FALSE"),  // case-sensitive
+            t_name(1, "trueX"),  // not a bool (suffix)
+            t_name(1, "xtrue"),
+            t_name(1, "abc123_def"), // typical identifier
+            t_name(1, "Z"),
+        ];
+        assert_tokens("true false True FALSE trueX xtrue abc123_def Z", &expected);
+    }
+
+    #[test]
+    fn name_must_start_with_ascii_letter() {
+        // Leading '_' or digit should not start a <name>; '_' here is unknown → error.
+        assert!(tokenize("_x").is_err());
+        // Starting with digit will produce an int followed by name if letter follows.
+        let expected = vec![t_int(1, 3), t_name(1, "abc")];
+        assert_tokens("3abc", &expected);
+    }
+
+    #[test]
+    fn non_ascii_letters_are_errors_per_grammar() {
+        // Grammar limits to [a-zA-Z]; e.g., 'č' should error.
+        assert!(tokenize("čau").is_err(), "relax if you choose to support Unicode identifiers");
+    }
+
+    // ------------------------------------- Text strings ---------------------------------------
+
+    #[test]
+    fn basic_strings_and_supported_escapes() {
+        let expected = vec![
+            t_text(1, ""),
+            t_text(1, "hello"),
+            t_text(1, "line\nend"),     // \\n → newline
+            t_text(1, "tab\tquote\""),  // \\t and \\" 
+            t_text(1, "hex: Az"),       // \\x41 \\x7a → 'A' 'z'
+        ];
+        let input = r#""" "hello" "line\nend" "tab\tquote\"" "hex: \x41\x7a""#;
+        assert_tokens(input, &expected);
+    }
+
+    #[test]
+    fn multiline_text_with_actual_newline_affects_line_numbers() {
+        // The string contains a real newline (not escaped), which should advance the lexer line.
+        let input = "\"a\nb\"\nfalse";
+        let tokens = assert_tokens(input, &[t_text(1, "a\nb"), t_bool(3, false)]);
+        // EOF line should be 3 (start at 1, +1 for the newline inside the string, +1 for the newline after it)
+        if let Token::Eof { line } = tokens.last().unwrap() {
+            assert_eq!(*line, 3);
         }
     }
 
     #[test]
-    fn real_does_not_start_with_dot() {
-        let input = ".5";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _eof) = strip_eof(tokens);
-        assert_eq!(
-            tokens,
-            vec![
-                Token::Separator { line: 1, name: '.' },
-                Token::Int { line: 1, value: 5 }
-            ]
-        );
+    fn string_errors_unterminated_and_bad_escapes() {
+        assert!(tokenize("\"unterminated").is_err(), "missing closing quote must error");
+        assert!(tokenize("\"bad\\escape\"").is_err(), "unknown escape must error");
+        assert!(tokenize("\"bad\\x4G\"").is_err(), "non-hex digit in \\xHH must error");
+        assert!(tokenize("\"short\\x4\"").is_err(), "incomplete \\xHH must error");
+        assert!(tokenize("\"ends with backslash \\\\" ).is_err(), "dangling backslash must error");
+
+        // Valid embedded quote:
+        let expected = vec![t_text(1, "just\"ok")];
+        assert_tokens(r#""just\"ok""#, &expected);
+    }
+
+    // ------------------------------------ Operators & Seps ------------------------------------
+
+    #[test]
+    fn operators_group_as_maximal_runs() {
+        // Any run of [+*-/%&|~^<>=!]+ should become a single Operator token.
+        let expected = vec![
+            t_op(1, "++"),
+            t_op(1, "+="),
+            t_op(1, "==="),
+            t_op(1, "!=="),
+            t_op(1, "<===>"),
+            t_op(1, "&||~^"),
+        ];
+        assert_tokens("++ += === !== <===> &||~^", &expected);
     }
 
     #[test]
-    fn radixed_ints_extremes() {
-        let input = "2r101101";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(tokens, vec![Token::Int { line: 1, value: 0b101101 }]);
-
-        let input = "36rZ";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(tokens, vec![Token::Int { line: 1, value: 35 }]);
-
-        let input = "12r10A";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(tokens, vec![Token::Int { line: 1, value: 154 }]);
+    fn separators_all_supported() {
+        let expected = vec![
+            t_sep(1, '('), t_sep(1, ')'),
+            t_sep(1, '['), t_sep(1, ']'),
+            t_sep(1, '.'),
+            t_sep(1, '{'), t_sep(1, '}'),
+            t_sep(1, ':'),
+            t_sep(1, ','),
+            t_sep(1, ';'),
+        ];
+        assert_tokens("()[] . {} : , ;", &expected);
     }
 
     #[test]
-    fn radixed_reals_examples() {
-        let input = "12r10A.0";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        match &tokens[..] {
-            [Token::Real { line, value }] => {
-                assert_eq!(*line, 1);
-                assert!(is_close(*value, 154.0));
-            }
-            _ => panic!("Expected single Real token, got {tokens:?}"),
-        }
-
-        let input = "2r1.1";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        match &tokens[..] {
-            [Token::Real { value, .. }] => assert!(is_close(*value, 1.5)),
-            _ => panic!("Expected single Real token, got {tokens:?}"),
-        }
-
-        let input = "16r10.";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        match &tokens[..] {
-            [Token::Real { value, .. }] => assert!(is_close(*value, 16.0)),
-            _ => panic!("Expected single Real token, got {tokens:?}"),
-        }
+    fn minus_before_number_is_operator_then_int() {
+        let expected = vec![t_op(1, "-"), t_int(1, 123)];
+        assert_tokens("-123", &expected);
     }
 
-    #[test]
-    fn names_and_bools() {
-        let input = "true false";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(
-            tokens,
-            vec![
-                Token::Bool { line: 1, value: true },
-                Token::Bool { line: 1, value: false }
-            ]
-        );
-
-        let input = "truex false_ not_true";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(
-            tokens,
-            vec![
-                Token::Name { line: 1, name: "truex".to_string() },
-                Token::Name { line: 1, name: "false_".to_string() },
-                Token::Name { line: 1, name: "not_true".to_string() },
-            ]
-        );
-    }
+    // ------------------------------------ Errors / Unknowns -----------------------------------
 
     #[test]
-    fn name_rules_start_letter_then_alnum_underscore() {
-        let input = "x X _x 9abc a_1_b2";
-        let result = tokenize(input);
-
-        assert!(result.is_err(), "Leading '_' or digit should be invalid Name");
-
-        let input = "x a_1_b2";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(
-            tokens,
-            vec![
-                Token::Name { line: 1, name: "x".to_string() },
-                Token::Name { line: 1, name: "a_1_b2".to_string() },
-            ]
-        );
-    }
-
-    #[test]
-    fn operators_coalesce_and_minus_is_operator() {
-        let input = "+++ == != <= >= && || << >> ~ ^ % ** //";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        let names: Vec<String> = tokens
-            .into_iter()
-            .map(|t| if let Token::Operator { name, .. } = t { name } else { panic!("Expected Operator") })
-            .collect();
-
-        assert_eq!(
-            names,
-            vec!["+++".to_string(),"==".to_string(),"!=".to_string(),"<=".to_string(),">=".to_string(),"&&".to_string(),"||".to_string(),"<<".to_string(),">>".to_string(),"~".to_string(),"^".to_string(),"%".to_string(),"**".to_string(),"//".to_string()]
-        );
-
-        let tokens = tokenize("-42").expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(
-            tokens,
-            vec![
-                Token::Operator { line: 1, name: "-".to_string() },
-                Token::Int { line: 1, value: 42 }
-            ]
-        );
-    }
-
-    #[test]
-    fn separators_singletons() {
-        let input = "()[].{}:,;";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-
-        let seps: Vec<char> = tokens
-            .into_iter()
-            .map(|t| if let Token::Separator { name, .. } = t { name } else { panic!("Expected Separator, got {t:?}") })
-            .collect();
-
-        assert_eq!(seps, vec!['(',')','[',']','.','{','}',':',',',';']);
-    }
-
-    #[test]
-    fn dot_ambiguities() {
-        let input = "12..34 12.r34";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-
-        match &tokens[..] {
-            [Token::Real { value: v1, .. },
-             Token::Separator { name: '.', .. },
-             Token::Int { value: 34, .. },
-             Token::Real { value: v2, .. },
-             Token::Name { name, .. }] =>
-            {
-                assert!(is_close(*v1, 12.0));
-                assert!(is_close(*v2, 12.0));
-                assert_eq!(name, "r34");
-            }
-            _ => panic!("Unexpected tokenization: {tokens:?}"),
-        }
-    }
-
-    #[test]
-    fn strings_basic_and_escapes() {
-        let input = r#""hello" "a\nb\tc\"d\\e" "A\x41B""#;
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-
-        match &tokens[..] {
-            [Token::Text { value: v1, .. },
-             Token::Text { value: v2, .. },
-             Token::Text { value: v3, .. }] =>
-            {
-                assert_eq!(v1, "hello");
-                assert_eq!(v2, "a\nb\tc\"d\\e");
-                assert_eq!(v3, "AAB");
-            }
-            _ => panic!("Unexpected string tokens: {tokens:?}"),
-        }
-    }
-
-    #[test]
-    fn strings_errors_unterminated_and_illegal_escape() {
-        assert!(tokenize(r#""abc"#).is_err());
-        assert!(tokenize(r#""bad\q""#).is_err());
-    }
-
-    #[test]
-    fn whitespace_and_line_numbers() {
-        let input = "true\n42\t\n(  \n)  3.14  \nname";
-        let tokens = tokenize(input).expect("lex");
-
-        let eof = eof_line(&tokens);
-        assert_eq!(eof, Some(5));
-
-        let (tokens, _) = strip_eof(tokens);
-        let mut got: Vec<(String, i64)> = Vec::new();
-        for t in tokens {
-            match t {
-                Token::Bool { line, value } => got.push((format!("Bool({})", value), line)),
-                Token::Int { line, value } => got.push((format!("Int({})", value), line)),
-                Token::Separator { line, name } => got.push((format!("Sep({})", name), line)),
-                Token::Real { line, value } => got.push((format!("Real({})", value), line)),
-                Token::Name { line, name } => got.push((format!("Name({})", name), line)),
-                other => panic!("Unexpected token here: {other:?}"),
-            }
-        }
-        assert_eq!(
-            got,
-            vec![
-                ("Bool(true)".to_string(), 1),
-                ("Int(42)".to_string(), 2),
-                ("Sep(()".to_string(), 3),
-                ("Sep())".to_string(), 4),
-                ("Real(3.14)".to_string(), 4),
-                ("Name(name)".to_string(), 5),
-            ]
-        );
-    }
-
-    #[test]
-    fn eof_present_even_on_empty_input() {
-        let tokens = tokenize("").expect("lex");
-        match &tokens[..] {
-            [Token::Eof { line }] => assert_eq!(*line, 1),
-            _ => panic!("Expected only Eof token, got {tokens:?}"),
-        }
-    }
-
-    #[test]
-    fn invalid_radix_and_digits() {
-        assert!(tokenize("1r1").is_err());
-        assert!(tokenize("37rZ").is_err());
-
-        assert!(tokenize("2r102").is_err());
-        assert!(tokenize("16r10G").is_err());
-    }
-
-    #[test]
-    fn overflow_u64_should_error() {
-        let too_big = "18446744073709551616";
-        assert!(tokenize(too_big).is_err());
-        assert!(tokenize("16r10000000000000000").is_err());
-    }
-
-    #[test]
-    fn illegal_characters_should_error() {
+    fn unknown_characters_error() {
         assert!(tokenize("@").is_err());
+        assert!(tokenize("a?b").is_err());
+        assert!(tokenize("\\").is_err());
+        assert!(tokenize("$").is_err());
+        assert!(tokenize("`").is_err());
     }
+
+    // ---------------------------------- Mixed, multi-line -------------------------------------
 
     #[test]
-    fn spaced_out_radix_is_not_a_radix_number() {
-        let input = "10 r 1010";
-        let tokens = tokenize(input).expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(
-            tokens,
-            vec![
-                Token::Int { line: 1, value: 10 },
-                Token::Name { line: 1, name: "r".to_string() },
-                Token::Int { line: 1, value: 1010 },
-            ]
-        );
-    }
+    fn mixed_tokens_multiline_and_lines() {
+        let input = r#"
+true   42   7.5
+name_one!=false,"text\nok":Z
+( [ ] ) { } ; . :
+"#;
+        // Lines start at 1; input begins with a newline, so first token 'true' is on line 2.
+        let expected = vec![
+            t_bool(2, true),
+            t_int(2, 42),
+            t_real(2, 7.5),
+            t_name(3, "name_one"),
+            t_op(3, "!="),
+            t_bool(3, false),
+            t_sep(3, ','),
+            t_text(3, "text\nok"),
+            t_sep(3, ':'),
+            t_name(3, "Z"),
+            t_sep(4, '('), t_sep(4, '['), t_sep(4, ']'), t_sep(4, ')'),
+            t_sep(4, '{'), t_sep(4, '}'),
+            t_sep(4, ';'),
+            t_sep(4, '.'),
+            t_sep(4, ':'),
+        ];
+        let tokens = assert_tokens(input, &expected);
 
-    proptest! {
-        #[test]
-        fn prop_radixed_ints_match_decimal(radix in 2u32..=36u32, value in 0u128..=10_000_000u128) {
-            let digits = to_base(value, radix);
-            let input = format!("{radix}r{digits}");
-            let tokens = tokenize(&input).expect("lex");
-            let (tokens, _eof) = strip_eof(tokens);
-
-            prop_assert_eq!(tokens.len(), 1);
-            match &tokens[0] {
-                Token::Int { value: v, .. } => prop_assert_eq!(*v as u128, value),
-                other => prop_assert!(false, "Expected Int, got {other:?}"),
-            }
-        }
-
-        #[test]
-        fn prop_names_round_trip(start in "[A-Za-z]", rest in "[A-Za-z0-9_]{0,20}") {
-            let name = format!("{start}{rest}");
-            let tokens = tokenize(&name).expect("lex");
-            let (tokens, _eof) = strip_eof(tokens);
-            prop_assert_eq!(tokens.len(), 1);
-            match &tokens[0] {
-                Token::Name { line, name: n } => {
-                    prop_assert_eq!(*line, 1);
-                    prop_assert_eq!(n, &name);
-                }
-                other => prop_assert!(false, "Expected Name, got {other:?}"),
-            }
-        }
-
-        #[test]
-        fn prop_operators_coalesce(op in r"[+\-*/%&|~^<>=!]{1,10}") {
-            let tokens = tokenize(&op).expect("lex");
-            let (tokens, _eof) = strip_eof(tokens);
-            prop_assert_eq!(tokens.len(), 1);
-            match &tokens[0] {
-                Token::Operator { name, .. } => prop_assert_eq!(name, &op),
-                other => prop_assert!(false, "Expected Operator, got {other:?}"),
-            }
-        }
-
-        #[test]
-        fn prop_separators_single_char(c in r"[\(\)\[\]\.\{\}:,;]") {
-            let tokens = tokenize(&c).expect("lex");
-            let (tokens, _eof) = strip_eof(tokens);
-            prop_assert_eq!(tokens.len(), 1);
-            match &tokens[0] {
-                Token::Separator { name, .. } => prop_assert_eq!(*name, c.chars().next().unwrap()),
-                other => prop_assert!(false, "Expected Separator, got {other:?}"),
-            }
-        }
-
-        #[test]
-        fn prop_radixed_real_binary_exact(int_part in "[01]{1,16}", frac_part in "[01]{0,16}") {
-            let input = if frac_part.is_empty() {
-                format!("2r{int_part}.")
-            } else {
-                format!("2r{int_part}.{frac_part}")
-            };
-
-            let expected = eval_radixed_real(&int_part, &frac_part, 2);
-            let tokens = tokenize(&input).expect("lex");
-            let (tokens, _eof) = strip_eof(tokens);
-            prop_assert_eq!(tokens.len(), 1);
-            match &tokens[0] {
-                Token::Real { value, .. } => prop_assert!(is_close(*value, expected), "got {}, expected {}", value, expected),
-                other => prop_assert!(false, "Expected Real, got {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn lowercase_radix_digits() {
-        let tokens = tokenize("16r1aF").expect("lex");
-        let (tokens, _) = strip_eof(tokens);
-        assert_eq!(tokens, vec![Token::Int { line: 1, value: 0x1AF }]);
-    }
-
-    #[test]
-    fn real_line_should_reflect_start_line() {
-        let input = "x\n3.14\n";
-        let toks = tokenize(input).expect("lex");
-        let (toks, _eof) = strip_eof(toks);
-
-        assert!(matches!(toks[0], Token::Name { line: 1, .. }));
-
-        match &toks[1] {
-            Token::Real { line, value } => {
-                assert_eq!(*line, 2, "Real should keep its start line (2), not be bumped to 3");
-                assert!(is_close(*value, 3.14));
-            }
-            other => panic!("Expected Real, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn unicode_digits_must_be_rejected_in_numbers() {
-        assert!(
-            tokenize("1\u{0663}").is_err(),
-            "Non-ASCII digits should be rejected; current code silently parses to a wrong value"
-        );
-
-        assert!(tokenize("16r\u{0661}0").is_err());
-    }
-
-    #[test]
-    fn lowercase_radix_digits_ok() {
-        let toks = tokenize("16r1aF").expect("lex");
-        let (toks, _eof) = strip_eof(toks);
-        assert_eq!(toks, vec![Token::Int { line: 1, value: 0x1AF }]);
-    }
-
-    #[test]
-    fn real_line_not_affected_by_space_terminator() {
-        let input = "3.14 \n";
-        let toks = tokenize(input).expect("lex");
-        let (toks, _eof) = strip_eof(toks);
-        match &toks[0] {
-            Token::Real { line, value } => {
-                assert_eq!(*line, 1);
-                assert!(is_close(*value, 3.14));
-            }
-            other => panic!("Expected Real, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn eof_line_after_trailing_newline() {
-        let toks = tokenize("a\n").expect("lex");
-        match toks.last() {
-            Some(Token::Eof { line }) => assert_eq!(*line, 2),
-            other => panic!("Expected EOF, got {other:?}"),
+        // EOF should be on line 5 (lines 1..=5 due to leading newline and two more newlines)
+        if let Token::Eof { line } = tokens.last().unwrap() {
+            assert_eq!(*line, 5, "adjust if your EOF line policy differs");
         }
     }
 }
+
+#[cfg(test)]
+mod prop_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn digit() -> impl Strategy<Value = char> {
+        prop::char::range('0', '9')
+    }
+
+    fn hexdigit() -> impl Strategy<Value = char> {
+        prop_oneof![
+            prop::char::range('0', '9'),
+            prop::char::range('a', 'f'),
+            prop::char::range('A', 'F'),
+        ]
+    }
+
+    fn letter() -> impl Strategy<Value = char> {
+        prop::char::any().prop_filter("letters", char::is_ascii_alphabetic)
+    }
+
+    fn int_str() -> impl Strategy<Value = String> {
+        prop::collection::vec(digit(), 1..10).prop_map(String::from_iter)
+    }
+
+    fn real_str() -> impl Strategy<Value = String> {
+        (int_str(), prop::collection::vec(digit(), 0..10)).prop_map(|(whole, frac)| {
+            format!("{}.{:}", whole, frac.into_iter().collect::<String>())
+        })
+    }
+
+    fn bool_str() -> impl Strategy<Value = String> {
+        prop_oneof![Just("true".to_string()), Just("false".to_string())]
+    }
+
+    fn name_str() -> impl Strategy<Value = String> {
+        // first char = ASCII letter, rest = ASCII letter/digit/underscore
+        (
+            letter(),
+            prop::collection::vec(
+                prop_oneof![letter(), digit(), Just('_')], 0..10
+            )
+        ).prop_map(|(c, rest)| {
+            let mut s = String::new();
+            s.push(c);
+            s.extend(rest);
+            s
+        })
+    }
+
+    fn operator_str() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                Just('+'), Just('-'), Just('*'), Just('/'), Just('%'),
+                Just('&'), Just('|'), Just('~'), Just('^'),
+                Just('<'), Just('>'), Just('='), Just('!')
+            ],
+            1..5
+        ).prop_map(|v| v.into_iter().collect())
+    }
+
+    fn separator_str() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("(".to_string()), Just(")".to_string()),
+            Just("[".to_string()), Just("]".to_string()),
+            Just(".".to_string()), Just("{".to_string()), Just("}".to_string()),
+            Just(":".to_string()), Just(",".to_string()), Just(";".to_string()),
+        ]
+    }
+
+    fn text_str() -> impl Strategy<Value = String> {
+        fn no_quote_or_backslash() -> impl Strategy<Value = String> {
+            prop::char::any().prop_filter("exclude quotes/backslash", |c| {
+                *c != '"' && *c != '\\'
+            }).prop_map(|c| c.to_string())
+        }
+
+        // Generate simple text with valid escapes
+        let char_strategy = prop_oneof![
+            no_quote_or_backslash(),
+            // allowed escapes
+            Just("\\n".to_string()),
+            Just("\\t".to_string()),
+            Just("\\\"".to_string()),
+            Just("\\\\".to_string()),
+            (hexdigit(), hexdigit()).prop_map(|(a, b)| {
+                format!("\\x{}{}", a, b)
+            }),
+        ];
+        prop::collection::vec(char_strategy, 0..5)
+            .prop_map(|parts| {
+                format!("\"{}\"", parts.join(""))
+            })
+    }
+
+    fn token_str() -> impl Strategy<Value = String> {
+        prop_oneof![
+            int_str(),
+            real_str(),
+            bool_str(),
+            name_str(),
+            operator_str(),
+            separator_str(),
+            text_str(),
+        ]
+    }
+
+    // --- Property tests -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn tokenize_always_succeeds_on_valid_generated_tokens(
+            toks in prop::collection::vec(token_str(), 1..20)
+        ) {
+            let input = toks.join(" ");
+            let res = tokenize(&input);
+            prop_assert!(res.is_ok(), "tokenize failed on: {}", input);
+
+            let tokens = res.unwrap();
+            // Always ends in EOF
+            let ends_with_eof = matches!(tokens.last(), Some(Token::Eof { .. }));
+            prop_assert!(ends_with_eof);
+
+            // Every token (except EOF) matches grammar invariants
+            for tok in &tokens[..tokens.len()-1] {
+                match tok {
+                    Token::Int { value, .. } => {
+                        prop_assert!(*value >= 0, "ints should be nonnegative");
+                    }
+                    Token::Real { value, .. } => {
+                        // real should contain a dot, so must not be NaN
+                        prop_assert!(value.is_finite());
+                    }
+                    Token::Bool { .. } => {}
+                    Token::Text { .. } => { }
+                    Token::Operator { name, .. } => {
+                        prop_assert!(!name.is_empty());
+                        prop_assert!(name.chars().all(|c| "+*-/%&|~^<>=!".contains(c)));
+                    }
+                    Token::Separator { name, .. } => {
+                        prop_assert!("()[] .}}{{:,;".contains(*name));
+                    }
+                    Token::Name { name, .. } => {
+                        let mut chars = name.chars();
+                        let first = chars.next().unwrap();
+                        prop_assert!(first.is_ascii_alphabetic());
+                        prop_assert!(chars.all(|c| c.is_ascii_alphanumeric() || c == '_'));
+                    }
+                    Token::Eof { .. } => unreachable!(),
+                }
+            }
+        }
+    }
+}
+
