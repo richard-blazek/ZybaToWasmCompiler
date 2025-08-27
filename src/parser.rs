@@ -4,6 +4,18 @@ use crate::builtin::is_builtin_operator;
 use crate::error::{err, Fallible};
 use crate::lexer::{Token, tokenize};
 
+/*
+<file> ::= <decl>*
+<decl> ::= <import> | <const>
+<expr> ::= (<name> "=")? <binop>
+<record> ::= "(" ")" | "(" <name> ":" <expr> ("," <name> ":" <expr>)* ")"
+<var> ::= <name> ("::" <name>)?
+<atom> ::= <int> | <real> | <text> | <bool> | <record> | <var> | <lambda> | <if> | <while> | <for>
+<operand> ::= <atom> ("." <name> | "[" (<expr> ("," <expr>)*)? "]")*
+<binop> ::= <operand> (<operator> <operand>)*
+
+*/
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int { line: i64, value: i64 },

@@ -585,6 +585,49 @@ mod prop_tests {
 
     proptest! {
         #[test]
+        fn tokenize_ints(toks in prop::collection::vec(int_str(), 1..20)) {
+            let correct = Vec::from_iter(toks.iter().map(|tok| {
+                let n = i64::from_str_radix(tok, 10).unwrap();
+                Token::Int { line: 1, value: n }
+            }).chain([Token::Eof { line: 1 }]));
+
+            let res = tokenize(&toks.join(" ")).unwrap();
+            assert_eq!(correct, res, "ints not tokenized correctly")
+        }
+
+        #[test]
+        fn tokenize_bools(toks in prop::collection::vec(bool_str(), 1..20)) {
+            let correct = Vec::from_iter(toks.iter().map(|tok| {
+                Token::Bool { line: 1, value: tok == "true" }
+            }).chain([Token::Eof { line: 1 }]));
+
+            let res = tokenize(&toks.join(" ")).unwrap();
+            assert_eq!(correct, res, "bools not tokenized correctly")
+        }
+
+        #[test]
+        fn tokenize_reals(toks in prop::collection::vec(real_str(), 1..20)) {
+            let correct = Vec::from_iter(toks.iter().map(|tok| {
+                let n: f64 = tok.parse().expect("unreachable");
+                Token::Real { line: 1, value: n }
+            }).chain([Token::Eof { line: 1 }]));
+
+            let res = tokenize(&toks.join(" ")).expect("it should not fail");
+            let eq = correct.iter().zip(res.iter()).all(|(check, result)| {
+                if let Token::Real { value: v1, .. } = check {
+                    if let Token::Real { value: v2, .. } = result {
+                        f64::abs(v1 - v2) < 0.0001
+                    } else {
+                        false
+                    }
+                } else {
+                    check == result
+                }
+            });
+            assert!(eq, "reals not tokenized correctly")
+        }
+
+        #[test]
         fn tokenize_always_succeeds_on_valid_generated_tokens(
             toks in prop::collection::vec(token_str(), 1..20)
         ) {
