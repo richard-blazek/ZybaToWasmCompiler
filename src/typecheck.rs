@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::builtin::*;
 use crate::error::{err, Fallible};
-use crate::scope;
+use crate::nameres;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -36,8 +36,8 @@ impl Value {
     }
 }
 
-fn check_type(tpe: &scope::Value) -> Fallible<Type> {
-    use scope::Value::*;
+fn check_type(tpe: &nameres::Value) -> Fallible<Type> {
+    use nameres::Value::*;
     match tpe {
         Var { line, name } => {
             if let Some(tpe) = get_scalar_type(name) {
@@ -69,8 +69,8 @@ fn check_type(tpe: &scope::Value) -> Fallible<Type> {
     }
 }
 
-fn global_env(globals: &HashMap<String, scope::Value>) -> Fallible<HashMap<String, Type>> {
-    use scope::Value::*;
+fn global_env(globals: &HashMap<String, nameres::Value>) -> Fallible<HashMap<String, Type>> {
+    use nameres::Value::*;
 
     let mut env = HashMap::new();
     for (name, value) in globals {
@@ -113,14 +113,14 @@ fn check_var(name: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     Ok(Value::Var { name, tpe: var_type })
 }
 
-fn check_init(name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_init(name: String, value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
     env.insert(name.clone(), value.tpe());
     let tpe = value.tpe();
     Ok(Value::Init { name, value, tpe })
 }
 
-fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_assign(line: i64, name: String, value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
     let tpe = env.get(&name).unwrap().clone();
     if tpe != value.tpe() {
@@ -129,7 +129,7 @@ fn check_assign(line: i64, name: String, value: scope::Value, env: &mut HashMap<
     Ok(Value::Assign { name, value, tpe })
 }
 
-fn check_record(fields: HashMap<String, scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_record(fields: HashMap<String, nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let fields = fields.into_iter().map(|(name, value)| {
         Ok((name, check_value(value, env)?))
     }).collect::<Fallible<HashMap<_, _>>>()?;
@@ -141,7 +141,7 @@ fn check_record(fields: HashMap<String, scope::Value>, env: &mut HashMap<String,
     Ok(Value::Record { fields, tpe: record_tpe })
 }
 
-fn check_access(line: i64, object: scope::Value, field: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_access(line: i64, object: nameres::Value, field: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let object = Box::new(check_value(object, env)?);
     if let Type::Record { fields } = object.tpe() {
         if let Some(field_tpe) = fields.get(&field) {
@@ -154,7 +154,7 @@ fn check_access(line: i64, object: scope::Value, field: String, env: &mut HashMa
     }
 }
 
-fn check_if(cond: scope::Value, then: Vec<scope::Value>, elsë: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_if(cond: nameres::Value, then: Vec<nameres::Value>, elsë: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
     let then = then.into_iter().map(|v| {
         check_value(v, env)
@@ -172,7 +172,7 @@ fn check_if(cond: scope::Value, then: Vec<scope::Value>, elsë: Vec<scope::Value
     Ok(Value::If { cond, then, elsë, tpe })
 }
 
-fn check_while(cond: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_while(cond: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
     let body = body.into_iter().map(|v| {
         check_value(v, env)
@@ -181,7 +181,7 @@ fn check_while(cond: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<St
     Ok(Value::While { cond, body, tpe })
 }
 
-fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_for(line: i64, key: String, value: String, expr: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let expr = Box::new(check_value(expr, env)?);
     if let Type::List { item } = expr.tpe() {
         env.insert(key.clone(), Type::Int);
@@ -199,7 +199,7 @@ fn check_for(line: i64, key: String, value: String, expr: scope::Value, body: Ve
     Ok(Value::For { key, value, expr, body, tpe })
 }
 
-fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope::Value, body: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_lambda(line: i64, args: Vec<(String, nameres::Value)>, return_type: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let args = args.into_iter().map(|(name, tpe)| {
         Ok((name, check_type(&tpe)?))
     }).collect::<Fallible<Vec<(String, Type)>>>()?;
@@ -223,7 +223,7 @@ fn check_lambda(line: i64, args: Vec<(String, scope::Value)>, return_type: scope
     }
 }
 
-fn check_call(line: i64, func: scope::Value, args: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_call(line: i64, func: nameres::Value, args: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let func = Box::new(check_value(func, env)?);
     if let Type::Func { args: expected, return_type } = func.tpe() {
         if args.len() != expected.len() {
@@ -242,7 +242,7 @@ fn check_call(line: i64, func: scope::Value, args: Vec<scope::Value>, env: &mut 
     }
 }
 
-fn check_builtin_call(line: i64, builtin: String, args: Vec<scope::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_builtin_call(line: i64, builtin: String, args: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let type_args = args.iter().map_while(|arg| {
         check_type(arg).ok()
     }).collect::<Vec<_>>();
@@ -261,7 +261,7 @@ fn check_builtin_call(line: i64, builtin: String, args: Vec<scope::Value>, env: 
     }
 }
 
-fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_bin_op(line: i64, name: String, lhs: nameres::Value, rhs: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let lhs = check_value(lhs, env)?;
     let rhs = check_value(rhs, env)?;
     if let Some(tpe) = apply_builtin_op(&name, lhs.tpe(), rhs.tpe()) {
@@ -271,8 +271,8 @@ fn check_bin_op(line: i64, name: String, lhs: scope::Value, rhs: scope::Value, e
     }
 }
 
-fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
-    use scope::Value::*;
+fn check_value(value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    use nameres::Value::*;
     match value {
         Int { value, .. } => check_int(value),
         Real { value, .. } => check_real(value),
@@ -298,7 +298,7 @@ fn check_value(value: scope::Value, env: &mut HashMap<String, Type>) -> Fallible
     }
 }
 
-pub fn check(globals: HashMap<String, scope::Value>) -> Fallible<HashMap<String, Value>> {
+pub fn check(globals: HashMap<String, nameres::Value>) -> Fallible<HashMap<String, Value>> {
     let mut env = global_env(&globals)?;
     globals.into_iter().map(|(name, value)| {
         Ok((name, check_value(value, &mut env)?))

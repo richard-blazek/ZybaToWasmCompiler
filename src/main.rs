@@ -4,8 +4,8 @@ mod error;
 mod lexer;
 mod parser;
 mod filesystem;
-mod scope;
 mod loader;
+mod nameres;
 mod builtin;
 mod typecheck;
 
@@ -110,7 +110,7 @@ fn main() {
         println!("Content: {:?}", decls);
     }
 
-    let (main_fn, decls) = match scope::name_resolution(main_path, files) {
+    let (main_fn, decls) = match nameres::name_resolution(main_path, files) {
         Ok((main_fn, decls)) => {
             (main_fn, decls)
         }

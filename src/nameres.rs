@@ -45,9 +45,9 @@ impl Value {
 }
 
 trait Environment {
-    fn new_unique_id(&mut self) -> String;
-    fn var_name(&self, module_path: &str, name: &str) -> Option<String>;
-    fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String>;
+    fn new_id(&mut self) -> String;
+    fn get_var(&self, module_path: &str, name: &str) -> Option<(String, bool)>;
+    fn get_ns(&self, module_path: &str, ns_name: &str) -> Option<String>;
 }
 
 struct GlobalEnv {
@@ -86,21 +86,21 @@ impl GlobalEnv {
 }
 
 impl Environment for GlobalEnv {
-    fn new_unique_id(&mut self) -> String {
+    fn new_id(&mut self) -> String {
         self.counter += 1;
         format!("_v{}", self.counter)
     }
 
-    fn var_name(&self, module_path: &str, name: &str) -> Option<String> {
+    fn get_var(&self, module_path: &str, name: &str) -> Option<(String, bool)> {
         let key = (module_path.into(), name.into());
         if let Some(uniq) = self.consts.get(&key) {
-            Some(uniq.into())
+            Some((uniq.clone(), false))
         } else {
             None
         }
     }
 
-    fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String> {
+    fn get_ns(&self, module_path: &str, ns_name: &str) -> Option<String> {
         let key = (module_path.into(), ns_name.into());
         self.imports.get(&key).cloned()
     }
@@ -109,34 +109,28 @@ impl Environment for GlobalEnv {
 struct LocalEnv<'a> {
     parent: &'a mut dyn Environment,
     locals: HashMap<String, String>,
-    module_path: &'a str
+    module_path: &'a str,
+    mutable: bool
 }
 
 impl<'a> LocalEnv<'a> {
-    fn new_var(&mut self, name: &str, shadow_parent: bool) -> Option<String> {
-        let exists = if shadow_parent {
-            self.locals.contains_key(name)
-        } else {
-            self.var_name(self.module_path, name).is_some()
-        };
-        if !exists {
-            let uniq = self.new_unique_id();
-            self.locals.insert(name.to_string(), uniq.clone());
-            Some(uniq)
-        } else {
-            None
-        }
+    fn add_var(&mut self, name: &str) -> Option<String> {
+        let uniq = self.new_id();
+        let prev = self.locals.insert(name.to_string(), uniq.clone());
+        if prev.is_none() { Some(uniq) } else { None }
     }
 
     fn new_module(parent: &'a mut GlobalEnv, module_path: &'a str, decls: &Vec<Decl>) -> Fallible<LocalEnv<'a>> {
-        let mut env = LocalEnv { parent, module_path, locals: HashMap::new() };
+        let mut env = LocalEnv {
+            parent, module_path, locals: HashMap::new(), mutable: false
+        };
         for decl in decls {
             if let Decl::Const { line, name, private: true, .. } = decl {
                 builtin_check(*line, name)?;
-                if env.var_name(module_path, name).is_some() {
+                if env.get_var(module_path, name).is_some() {
                     err(*line, format!("Cannot declare {} twice", name))?;
                 } else {
-                    env.new_var(name, true);
+                    env.add_var(name);
                 }
             }
         }
@@ -145,28 +139,28 @@ impl<'a> LocalEnv<'a> {
 
     fn new_scope(parent: &'a mut LocalEnv) -> LocalEnv<'a> {
         let module_path = parent.module_path;
-        LocalEnv { parent, locals: HashMap::new(), module_path }
+        LocalEnv { parent, locals: HashMap::new(), module_path, mutable: true }
     }
 }
 
 impl<'a> Environment for LocalEnv<'a> {
-    fn new_unique_id(&mut self) -> String {
-        self.parent.new_unique_id()
+    fn new_id(&mut self) -> String {
+        self.parent.new_id()
     }
 
-    fn var_name(&self, module_path: &str, name: &str) -> Option<String> {
+    fn get_var(&self, module_path: &str, name: &str) -> Option<(String, bool)> {
         if module_path != self.module_path {
-            self.parent.var_name(module_path, name)
+            self.parent.get_var(module_path, name)
         }
         else if let Some(uniq) = self.locals.get(name) {
-            Some(uniq.into())
+            Some((uniq.clone(), self.mutable))
         } else {
-            self.parent.var_name(module_path, name)
+            self.parent.get_var(module_path, name)
         }
     }
 
-    fn ns_path(&self, module_path: &str, ns_name: &str) -> Option<String> {
-        self.parent.ns_path(module_path, ns_name)
+    fn get_ns(&self, module_path: &str, ns_name: &str) -> Option<String> {
+        self.parent.get_ns(module_path, ns_name)
     }
 }
 
@@ -180,15 +174,15 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
             Ok(Value::Var { line, name })
         }
         Expr::Var { line, ns: None, name } => {
-            if let Some(name) = env.var_name(ns_path, &name) {
+            if let Some((name, _)) = env.get_var(ns_path, &name) {
                 Ok(Value::Var { line, name })
             } else {
                 err(line, format!("Undefined identifier {}", name))
             }
         }
         Expr::Var { line, ns: Some(ns_name), name } => {
-            if let Some(ns_path) = env.ns_path(ns_path, &ns_name) {
-                if let Some(name) = env.var_name(&ns_path, &name) {
+            if let Some(ns_path) = env.get_ns(ns_path, &ns_name) {
+                if let Some((name, _)) = env.get_var(&ns_path, &name) {
                     Ok(Value::Var { line, name })
                 } else {
                     err(line, format!("Undefined identifier {}", name))
@@ -226,7 +220,7 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
 
             let args = args.into_iter().map(|(name, tpe)| {
                 builtin_check(line, &name)?;
-                let name = if let Some(name) = inner.new_var(&name, true) {
+                let name = if let Some(name) = inner.add_var(&name) {
                     name
                 } else {
                     err(line, format!("Duplicate argument name {}", name))?
@@ -247,11 +241,14 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
         Expr::Assign { line, name, expr: value } => {
             builtin_check(line, &name)?;
             let value = nameres_expr(*value, ns_path, env)?;
-            if let Some(name) = env.new_var(&name, false) {
-                Ok(Value::Init { line, name, value: Box::new(value) })
-            } else {
-                let name = env.var_name(ns_path, &name).unwrap();
+            let var = env.get_var(ns_path, &name);
+            if let Some((_, false)) = var {
+                err(line, format!("Cannot reassign a constant {}", name))
+            } else if let Some((name, true)) = var {
                 Ok(Value::Assign { line, name, value: Box::new(value) })
+            } else {
+                env.add_var(&name);
+                Ok(Value::Init { line, name, value: Box::new(value) })
             }
         }
         Expr::If { line, cond, then, elsë } => Ok(Value::If {
@@ -278,12 +275,12 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
             let mut inner = LocalEnv::new_scope(env);
             let key = if let Some(key) = key {
                 builtin_check(line, &key)?;
-                inner.new_var(&key, true).unwrap()
+                inner.add_var(&key).unwrap()
             } else {
-                inner.new_unique_id()
+                inner.new_id()
             };
             builtin_check(line, &value)?;
-            let value = if let Some(value) = inner.new_var(&value, true) {
+            let value = if let Some(value) = inner.add_var(&value) {
                 value
             } else {
                 err(line, "For-loop variables have identical names".into())?
@@ -311,7 +308,7 @@ pub fn name_resolution(main: String, modules: HashMap<String, Vec<Decl>>) -> Fal
         let mut env = LocalEnv::new_module(&mut global_env, &path, &decls)?;
         for decl in decls {
             if let Decl::Const { name, expr, .. } = decl {
-                let new_name = env.var_name(&path, &name).unwrap();
+                let (new_name, _) = env.get_var(&path, &name).unwrap();
                 let new_value = nameres_expr(expr, &path, &mut env)?;
 
                 if path == main && name == "main" {
@@ -331,7 +328,7 @@ pub fn name_resolution(main: String, modules: HashMap<String, Vec<Decl>>) -> Fal
 }
 
 #[cfg(test)]
-mod name_resolution_tests {
+mod nameres_tests {
     use super::*;
     use std::collections::HashMap;
 

@@ -213,7 +213,7 @@ pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
 }
 
 #[cfg(test)]
-mod tests {
+mod lexer_tests {
     use std::i64;
 
     use super::*;
