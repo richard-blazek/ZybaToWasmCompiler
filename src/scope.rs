@@ -133,8 +133,10 @@ impl<'a> LocalEnv<'a> {
         for decl in decls {
             if let Decl::Const { line, name, private: true, .. } = decl {
                 builtin_check(*line, name)?;
-                if env.new_var(name, true).is_none() {
+                if env.var_name(module_path, name).is_some() {
                     err(*line, format!("Cannot declare {} twice", name))?;
+                } else {
+                    env.new_var(name, true);
                 }
             }
         }
@@ -321,5 +323,276 @@ pub fn name_resolution(main: String, modules: HashMap<String, Vec<Decl>>) -> Fal
         Ok((main_name, result))
     } else {
         err(0, "No main function defined".into())
+    }
+}
+
+#[cfg(test)]
+mod name_resolution_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn int(value: i64) -> Expr {
+        Expr::Int { line: 1, value }
+    }
+
+    fn real() -> Expr {
+        Expr::Real { line: 1, value: 4.5 }
+    }
+
+    fn text() -> Expr {
+        Expr::Text { line: 1, value: "zyba".to_string() }
+    }
+
+    fn bool() -> Expr {
+        Expr::Bool { line: 1, value: true }
+    }
+
+    fn var(name: &str) -> Expr {
+        Expr::Var { line: 1, ns: None, name: name.to_string() }
+    }
+
+    fn var_ns(ns: &str, name: &str) -> Expr {
+        Expr::Var { line: 1, ns: Some(ns.to_string()), name: name.to_string() }
+    }
+
+    fn record() -> Expr {
+        Expr::Record {
+            line: 1,
+            fields: HashMap::from_iter([
+                ("b".to_string(), bool()),
+                ("t".to_string(), text())
+            ])
+        }
+    }
+
+    fn access(name: &str, field: &str) -> Expr {
+        Expr::Access {
+            line: 1,
+            object: Box::new(var(name)),
+            field: field.to_string(),
+        }
+    }
+
+    fn call(func: &str, args: Expr) -> Expr {
+        Expr::Call {
+            line: 1,
+            func: Box::new(var(func)),
+            args: vec![args],
+        }
+    }
+
+    fn binop() -> Expr {
+        Expr::BinOp {
+            line: 1,
+            name: "+".to_string(),
+            lhs: Box::new(int(1)),
+            rhs: Box::new(int(2)),
+        }
+    }
+
+    fn const_decl(name: &str, expr: Expr, private: bool) -> Decl {
+        Decl::Const { line: 1, name: name.to_string(), expr, private }
+    }
+
+    fn import_decl(path: &str) -> Decl {
+        Decl::Import { line: 1, path: path.to_string() }
+    }
+
+    fn get_key<K: Clone, V: PartialEq + Clone>(map: &HashMap<K, V>, val: &V) -> Option<K> {
+        match map.iter().filter(|(_, v)| *v == val).map(|(k, _)| k).next() {
+            Some(k) => Some(k.clone()),
+            None => None
+        }
+    }
+
+    #[test]
+    fn test_simple_const() {
+        use Value::*;
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "main.zyba".to_string(),
+            vec![
+                const_decl("main", int(123), false),
+                const_decl("num", real(), false),
+                const_decl("str", text(), true),
+                const_decl("truth", bool(), true),
+                const_decl("str2", var("str"), true),
+                const_decl("record", record(), true),
+                const_decl("sum", binop(), true),
+                const_decl("field", access("record", "b"), true),
+                const_decl("call", call("print", var("str")), true),
+            ]
+        );
+
+        let (main_name, table) = name_resolution("main.zyba".into(), modules).unwrap();
+        assert!(table.contains_key(&main_name));
+
+        match table.get(&main_name) {
+            Some(v) => {
+                assert_eq!(v.line(), 1);
+                assert!(matches!(v, Int { value: 123, .. }));
+            }
+            _ => panic!("expected value 123"),
+        }
+
+        assert!(get_key(&table, &Real { value: 4.5, line: 1 }).is_some());
+        assert!(get_key(&table, &Bool { value: true, line: 1 }).is_some());
+        let str_key = get_key(&table, &Text { value: "zyba".to_string(), line: 1 }).expect("str not found");
+        assert!(get_key(&table, &Var { name: str_key.clone(), line: 1 }).is_some());
+
+        let e_key = get_key(&table, &Record {
+            line: 1,
+            fields: HashMap::from_iter([
+                ("b".to_string(), Bool { line: 1, value: true }),
+                ("t".to_string(), Text { line: 1, value: "zyba".to_string() }),
+            ])
+        }).expect("record not found");
+
+        assert!(get_key(&table, &BinOp {
+            line: 1,
+            name: "+".to_string(),
+            lhs: Box::new(Int { line: 1, value: 1 }),
+            rhs: Box::new(Int { line: 1, value: 2 }),
+        }).is_some());
+
+        assert!(get_key(&table, &Access {
+            line: 1,
+            object: Box::new(Var { line: 1, name: e_key }),
+            field: "b".to_string()
+        }).is_some());
+
+        assert!(get_key(&table, &Call {
+            line: 1,
+            func: Box::new(Var { line: 1, name: "print".to_string() }),
+            args: vec![Var { line: 1, name: str_key }]
+        }).is_some());
+    }
+
+    #[test]
+    fn test_import() {
+        use Value::*;
+
+        let mut modules = HashMap::new();
+        modules.insert("main.zyba".into(), vec![
+            import_decl("lib.zyba"),
+            const_decl("main", var_ns("lib", "foo"), false)
+        ]);
+        modules.insert("lib.zyba".into(), vec![
+            const_decl("foo", var("bar"), false),
+            const_decl("bar", int(42), true),
+            const_decl("baz", var("print"), true)
+        ]);
+
+        let (main_name, table) = name_resolution("main.zyba".into(), modules).unwrap();
+        
+        assert!(get_key(&table, &Var { line: 1, name: "print".to_string() }).is_some());
+        let bar = get_key(&table, &Int { line: 1, value: 42 }).expect("constant not resolved correctly");
+        let foo = get_key(&table, &Var { line: 1, name: bar }).expect("foo/bar not resolved correctly");
+        let main = get_key(&table, &Var { line: 1, name: foo });
+        assert_eq!(main, Some(main_name));
+    }
+
+    #[test]
+    fn test_shadowing_assignment_and_reuse() {
+        let body = vec![
+            Expr::Assign { line: 1, name: "x".into(), expr: Box::new(int(1)) },
+            Expr::Assign { line: 1, name: "x".into(), expr: Box::new(int(2)) },
+        ];
+        let main = vec![const_decl("main", Expr::Lambda {
+            line: 1,
+            args: vec![],
+            return_type: Box::new(int(0)),
+            body
+        }, false)];
+
+        let mut modules = HashMap::new();
+        modules.insert("main.zyba".into(), main);
+
+        let (_, table) = name_resolution("main.zyba".into(), modules).unwrap();
+        // just ensure it succeeds: first Assign => Init, second => Assign
+        match table.values().next().unwrap() {
+            Value::Lambda { body, .. } => {
+                assert!(matches!(body[0], Value::Init { .. }));
+                assert!(matches!(body[1], Value::Assign { .. }));
+            }
+            v => panic!("unexpected {:?}", v),
+        }
+    }
+
+    #[test]
+    fn test_duplicate_is_error() {
+        let cases = vec![
+            vec![const_decl("main", bool(), true), const_decl("x", bool(), true), const_decl("x", bool(), true)],
+            vec![const_decl("main", bool(), true), const_decl("x", bool(), true), const_decl("x", bool(), false)],
+            vec![const_decl("main", bool(), true), const_decl("x", bool(), false), const_decl("x", bool(), true)],
+            vec![const_decl("main", bool(), true), const_decl("x", bool(), false), const_decl("x", bool(), false)],
+        ];
+
+        for case in cases {
+            let modules = HashMap::from_iter([("main.zyba".into(), case)]);
+            name_resolution("main.zyba".into(), modules).expect_err("cannot redeclare x");
+        }
+    }
+
+    #[test]
+    fn test_unknown_is_error() {
+        let cases = vec![var("x"), var_ns("lib", "y"), var_ns("std", "y")];
+
+        for case in cases {
+            let modules = HashMap::from_iter([
+                ("main.zyba".into(), vec![
+                    import_decl("lib.zyba"),
+                    const_decl("main", case, false)
+                ]),
+                ("lib.zyba".into(), vec![])
+            ]);
+            name_resolution("main.zyba".into(), modules).expect_err("undefined name");
+        }
+    }
+
+    #[test]
+    fn test_duplicate_import_is_error() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "main.zyba".into(),
+            vec![
+                import_decl("lib.zyba"),
+                import_decl("other/lib.zyba"),
+                const_decl("main", int(1), false),
+            ]
+        );
+        modules.insert("lib.zyba".into(), vec![]);
+        modules.insert("other/lib.zyba".into(), vec![]);
+        name_resolution("main.zyba".into(), modules).expect_err("duplicate import");
+    }
+
+    #[test]
+    fn test_builtin_name_const_is_error() {
+        let mut modules = HashMap::new();
+        modules.insert("main.zyba".into(), vec![const_decl("print", int(1), false)]);
+        name_resolution("main.zyba".into(), modules).expect_err("cannot assign to builtin");
+    }
+
+    #[test]
+    fn test_no_main_function_is_error() {
+        let modules = HashMap::from_iter([("main.zyba".into(), vec![])]);
+        name_resolution("main.zyba".into(), modules).expect_err("No main function");
+    }
+
+    #[test]
+    fn test_duplicate_argument_is_error() {
+        let modules = HashMap::from_iter([("main.zyba".to_string(), vec![
+            const_decl("main", Expr::Lambda {
+                line: 1,
+                args: vec![
+                    ("x".to_string(), var("Int")),
+                    ("x".to_string(), var("Text"))
+                ],
+                return_type: Box::new(var("Int")),
+                body: vec![]
+            }, false)
+        ])]);
+        name_resolution("main.zyba".into(), modules).expect_err("No main function");
     }
 }
