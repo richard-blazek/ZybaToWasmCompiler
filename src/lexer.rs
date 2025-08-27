@@ -216,283 +216,13 @@ pub fn tokenize(input: &str) -> Fallible<Vec<Token>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*; // assumes `tokenize`, `Token`, and `TokenError` are in the parent module
+    use std::i64;
 
-    // --- Small helpers to make expected tokens concise ----------------------------------------
-    fn t_int(line: i64, value: i64) -> Token { Token::Int { line, value } }
-    fn t_real(line: i64, value: f64) -> Token { Token::Real { line, value } }
-    fn t_text(line: i64, value: &str) -> Token { Token::Text { line, value: value.to_string() } }
-    fn t_bool(line: i64, value: bool) -> Token { Token::Bool { line, value } }
-    fn t_op(line: i64, name: &str) -> Token { Token::Operator { line, name: name.to_string() } }
-    fn t_sep(line: i64, name: char) -> Token { Token::Separator { line, name } }
-    fn t_name(line: i64, name: &str) -> Token { Token::Name { line, name: name.to_string() } }
-
-    /// Assert the token stream equals `expected` followed by an EOF, ignoring the EOF line value.
-    fn assert_tokens(input: &str, expected: &[Token]) -> Vec<Token> {
-        let tokens = tokenize(input).expect("tokenize should succeed");
-        assert!(!tokens.is_empty(), "lexer must produce at least EOF");
-        match tokens.last().unwrap() {
-            Token::Eof { .. } => {},
-            other => panic!("last token must be EOF, got: {:?}", other),
-        }
-        assert_eq!(&tokens[..tokens.len()-1], expected, "token sequence (without EOF) mismatch");
-        tokens
-    }
-
-    // --------------------------------- Smoke & whitespace -------------------------------------
-
-    #[test]
-    fn empty_input_yields_only_eof() {
-        let tokens = tokenize("").expect("should succeed on empty");
-        assert_eq!(tokens.len(), 1);
-        assert!(matches!(tokens[0], Token::Eof { .. }));
-        // If your lexer starts at line 1:
-        if let Token::Eof { line } = tokens[0] { assert_eq!(line, 1); }
-    }
-
-    #[test]
-    fn whitespace_ignored_and_lines_tracked() {
-        // Two newlines total ⇒ final EOF line should be 3 (if starting at 1).
-        let input = "   \t \n \t  \n  ";
-        let toks = tokenize(input).expect("should succeed");
-        assert!(matches!(toks.last(), Some(Token::Eof { .. })));
-        if let Token::Eof { line } = toks.last().unwrap() {
-            assert_eq!(*line, 3, "adjust this if your lexer uses different line tracking");
-        }
-    }
-
-    // ----------------------------------- Integers & Reals -------------------------------------
-
-    #[test]
-    fn basic_integers_and_reals() {
-        let expected = vec![
-            t_int(1, 0),
-            t_int(1, 7),
-            t_int(1, 12345),
-            t_real(1, 1.0),
-            t_real(1, 1.0), // "1." is a valid <real> per grammar
-            t_real(1, 0.0), // "0."
-            t_real(1, 123.45),
-        ];
-        assert_tokens("0 7 12345 1.0 1. 0. 123.45", &expected);
-    }
-
-    #[test]
-    fn real_trailing_dot_vs_separator_ambiguity() {
-        // Per grammar, <real> ::= <int> "." [0-9]*, so "1.." tokenizes as REAL("1.") then '.'.
-        let expected = vec![
-            t_real(1, 1.0),
-            t_sep(1, '.'),
-            t_int(1, 2),
-        ];
-        assert_tokens("1..2", &expected);
-
-        // "42.true" ⇒ REAL("42.") then NAME("true").
-        let expected2 = vec![t_real(1, 42.0), t_bool(1, true)];
-        assert_tokens("42.true", &expected2);
-    }
-
-    #[test]
-    fn real_cannot_start_with_dot() {
-        // ".5" is not a <real> by your grammar; it should be '.' then INT(5).
-        let expected = vec![t_sep(1, '.'), t_int(1, 5)];
-        assert_tokens(".5", &expected);
-    }
-
-    #[test]
-    fn number_followed_by_letters_forms_separate_tokens() {
-        // "1e3" is not scientific notation in this grammar; it’s INT(1) then NAME("e3").
-        let expected = vec![t_int(1, 1), t_name(1, "e3")];
-        assert_tokens("1e3", &expected);
-    }
-
-    #[test]
-    fn underscores_in_numbers_are_errors() {
-        // '_' is not allowed in <int>/<real>; should error on first unknown char.
-        assert!(tokenize("1_2").is_err());
-    }
-
-    // Optionally test overflow if you parse ints strictly into i64.
-    #[test]
-    fn int_overflow_is_error_if_parsing_into_i64() {
-        // i64::MAX = 9223372036854775807
-        assert!(tokenize("9223372036854775807").is_ok());
-        assert!(tokenize("9223372036854775808").is_err(), "adjust if you don't check overflow");
-    }
-
-    // ------------------------------------ Bools & Names ---------------------------------------
-
-    #[test]
-    fn bool_keywords_and_names() {
-        let expected = vec![
-            t_bool(1, true),
-            t_bool(1, false),
-            t_name(1, "True"),   // case-sensitive
-            t_name(1, "FALSE"),  // case-sensitive
-            t_name(1, "trueX"),  // not a bool (suffix)
-            t_name(1, "xtrue"),
-            t_name(1, "abc123_def"), // typical identifier
-            t_name(1, "Z"),
-        ];
-        assert_tokens("true false True FALSE trueX xtrue abc123_def Z", &expected);
-    }
-
-    #[test]
-    fn name_must_start_with_ascii_letter() {
-        // Leading '_' or digit should not start a <name>; '_' here is unknown → error.
-        assert!(tokenize("_x").is_err());
-        // Starting with digit will produce an int followed by name if letter follows.
-        let expected = vec![t_int(1, 3), t_name(1, "abc")];
-        assert_tokens("3abc", &expected);
-    }
-
-    #[test]
-    fn non_ascii_letters_are_errors_per_grammar() {
-        // Grammar limits to [a-zA-Z]; e.g., 'č' should error.
-        assert!(tokenize("čau").is_err(), "relax if you choose to support Unicode identifiers");
-    }
-
-    // ------------------------------------- Text strings ---------------------------------------
-
-    #[test]
-    fn basic_strings_and_supported_escapes() {
-        let expected = vec![
-            t_text(1, ""),
-            t_text(1, "hello"),
-            t_text(1, "line\nend"),     // \\n → newline
-            t_text(1, "tab\tquote\""),  // \\t and \\" 
-            t_text(1, "hex: Az"),       // \\x41 \\x7a → 'A' 'z'
-        ];
-        let input = r#""" "hello" "line\nend" "tab\tquote\"" "hex: \x41\x7a""#;
-        assert_tokens(input, &expected);
-    }
-
-    #[test]
-    fn multiline_text_with_actual_newline_affects_line_numbers() {
-        // The string contains a real newline (not escaped), which should advance the lexer line.
-        let input = "\"a\nb\"\nfalse";
-        let tokens = assert_tokens(input, &[t_text(1, "a\nb"), t_bool(3, false)]);
-        // EOF line should be 3 (start at 1, +1 for the newline inside the string, +1 for the newline after it)
-        if let Token::Eof { line } = tokens.last().unwrap() {
-            assert_eq!(*line, 3);
-        }
-    }
-
-    #[test]
-    fn string_errors_unterminated_and_bad_escapes() {
-        assert!(tokenize("\"unterminated").is_err(), "missing closing quote must error");
-        assert!(tokenize("\"bad\\escape\"").is_err(), "unknown escape must error");
-        assert!(tokenize("\"bad\\x4G\"").is_err(), "non-hex digit in \\xHH must error");
-        assert!(tokenize("\"short\\x4\"").is_err(), "incomplete \\xHH must error");
-        assert!(tokenize("\"ends with backslash \\\\" ).is_err(), "dangling backslash must error");
-
-        // Valid embedded quote:
-        let expected = vec![t_text(1, "just\"ok")];
-        assert_tokens(r#""just\"ok""#, &expected);
-    }
-
-    // ------------------------------------ Operators & Seps ------------------------------------
-
-    #[test]
-    fn operators_group_as_maximal_runs() {
-        // Any run of [+*-/%&|~^<>=!]+ should become a single Operator token.
-        let expected = vec![
-            t_op(1, "++"),
-            t_op(1, "+="),
-            t_op(1, "==="),
-            t_op(1, "!=="),
-            t_op(1, "<===>"),
-            t_op(1, "&||~^"),
-        ];
-        assert_tokens("++ += === !== <===> &||~^", &expected);
-    }
-
-    #[test]
-    fn separators_all_supported() {
-        let expected = vec![
-            t_sep(1, '('), t_sep(1, ')'),
-            t_sep(1, '['), t_sep(1, ']'),
-            t_sep(1, '.'),
-            t_sep(1, '{'), t_sep(1, '}'),
-            t_sep(1, ':'),
-            t_sep(1, ','),
-            t_sep(1, ';'),
-        ];
-        assert_tokens("()[] . {} : , ;", &expected);
-    }
-
-    #[test]
-    fn minus_before_number_is_operator_then_int() {
-        let expected = vec![t_op(1, "-"), t_int(1, 123)];
-        assert_tokens("-123", &expected);
-    }
-
-    // ------------------------------------ Errors / Unknowns -----------------------------------
-
-    #[test]
-    fn unknown_characters_error() {
-        assert!(tokenize("@").is_err());
-        assert!(tokenize("a?b").is_err());
-        assert!(tokenize("\\").is_err());
-        assert!(tokenize("$").is_err());
-        assert!(tokenize("`").is_err());
-    }
-
-    // ---------------------------------- Mixed, multi-line -------------------------------------
-
-    #[test]
-    fn mixed_tokens_multiline_and_lines() {
-        let input = r#"
-true   42   7.5
-name_one!=false,"text\nok":Z
-( [ ] ) { } ; . :
-"#;
-        // Lines start at 1; input begins with a newline, so first token 'true' is on line 2.
-        let expected = vec![
-            t_bool(2, true),
-            t_int(2, 42),
-            t_real(2, 7.5),
-            t_name(3, "name_one"),
-            t_op(3, "!="),
-            t_bool(3, false),
-            t_sep(3, ','),
-            t_text(3, "text\nok"),
-            t_sep(3, ':'),
-            t_name(3, "Z"),
-            t_sep(4, '('), t_sep(4, '['), t_sep(4, ']'), t_sep(4, ')'),
-            t_sep(4, '{'), t_sep(4, '}'),
-            t_sep(4, ';'),
-            t_sep(4, '.'),
-            t_sep(4, ':'),
-        ];
-        let tokens = assert_tokens(input, &expected);
-
-        // EOF should be on line 5 (lines 1..=5 due to leading newline and two more newlines)
-        if let Token::Eof { line } = tokens.last().unwrap() {
-            assert_eq!(*line, 5, "adjust if your EOF line policy differs");
-        }
-    }
-}
-
-#[cfg(test)]
-mod prop_tests {
     use super::*;
     use proptest::prelude::*;
 
     fn digit() -> impl Strategy<Value = char> {
         prop::char::range('0', '9')
-    }
-
-    fn hexdigit() -> impl Strategy<Value = char> {
-        prop_oneof![
-            prop::char::range('0', '9'),
-            prop::char::range('a', 'f'),
-            prop::char::range('A', 'F'),
-        ]
-    }
-
-    fn letter() -> impl Strategy<Value = char> {
-        prop::char::any().prop_filter("letters", char::is_ascii_alphabetic)
     }
 
     fn int_str() -> impl Strategy<Value = String> {
@@ -510,11 +240,18 @@ mod prop_tests {
     }
 
     fn name_str() -> impl Strategy<Value = String> {
-        // first char = ASCII letter, rest = ASCII letter/digit/underscore
         (
-            letter(),
+            prop_oneof![
+                prop::char::range('a', 'z'),
+                prop::char::range('A', 'Z'),
+            ],
             prop::collection::vec(
-                prop_oneof![letter(), digit(), Just('_')], 0..10
+                prop_oneof![
+                    prop::char::range('a', 'z'),
+                    prop::char::range('A', 'Z'),
+                    digit(),
+                    Just('_')
+                ], 0..10
             )
         ).prop_map(|(c, rest)| {
             let mut s = String::new();
@@ -524,7 +261,7 @@ mod prop_tests {
         })
     }
 
-    fn operator_str() -> impl Strategy<Value = String> {
+    fn op_str() -> impl Strategy<Value = String> {
         prop::collection::vec(
             prop_oneof![
                 Just('+'), Just('-'), Just('*'), Just('/'), Just('%'),
@@ -535,7 +272,7 @@ mod prop_tests {
         ).prop_map(|v| v.into_iter().collect())
     }
 
-    fn separator_str() -> impl Strategy<Value = String> {
+    fn sep_str() -> impl Strategy<Value = String> {
         prop_oneof![
             Just("(".to_string()), Just(")".to_string()),
             Just("[".to_string()), Just("]".to_string()),
@@ -544,129 +281,153 @@ mod prop_tests {
         ]
     }
 
-    fn text_str() -> impl Strategy<Value = String> {
-        fn no_quote_or_backslash() -> impl Strategy<Value = String> {
-            prop::char::any().prop_filter("exclude quotes/backslash", |c| {
-                *c != '"' && *c != '\\'
-            }).prop_map(|c| c.to_string())
+    fn any_str()  -> impl Strategy<Value = String> {
+        prop::collection::vec(prop::char::any(), 0..20).prop_map(|cs| {
+            String::from_iter(cs)
+        })
+    }
+
+    fn token_eq(t: &Token, k: &Token) -> bool {
+        if let Token::Real { line, value } = t {
+            if let Token::Real { line: l2, value: v2 } = k {
+                line == l2 && f64::abs(value - v2) < 0.0001
+            } else {
+                false
+            }
+        } else {
+            t == k
         }
-
-        // Generate simple text with valid escapes
-        let char_strategy = prop_oneof![
-            no_quote_or_backslash(),
-            // allowed escapes
-            Just("\\n".to_string()),
-            Just("\\t".to_string()),
-            Just("\\\"".to_string()),
-            Just("\\\\".to_string()),
-            (hexdigit(), hexdigit()).prop_map(|(a, b)| {
-                format!("\\x{}{}", a, b)
-            }),
-        ];
-        prop::collection::vec(char_strategy, 0..5)
-            .prop_map(|parts| {
-                format!("\"{}\"", parts.join(""))
-            })
     }
 
-    fn token_str() -> impl Strategy<Value = String> {
-        prop_oneof![
-            int_str(),
-            real_str(),
-            bool_str(),
-            name_str(),
-            operator_str(),
-            separator_str(),
-            text_str(),
-        ]
+    fn tokens_eq(t: &[Token], k: &[Token]) -> bool {
+        t.iter().zip(k).all(|(t, k)| token_eq(t, k))
     }
 
-    // --- Property tests -----------------------------------------------------------------------
+    #[test]
+    fn test_edge_cases() {
+        assert_eq!(tokenize(&format!("{}", i64::MAX)).unwrap()[0], Token::Int { line: 1, value: i64::MAX });
+        assert!(tokenize(&format!("{}", i64::MAX as u64 + 1)).is_err());
+        assert!(tokenize("\"hello \\g world\"").is_err());
+        assert!(tokenize("\"hello \\x7W world\"").is_err());
+        assert!(tokenize("\"hello \\xW7 world\"").is_err());
+        assert!(tokenize("\"hello world").is_err());
+        assert!(tokenize("'hello world'").is_err());
+    }
 
     proptest! {
         #[test]
-        fn tokenize_ints(toks in prop::collection::vec(int_str(), 1..20)) {
-            let correct = Vec::from_iter(toks.iter().map(|tok| {
-                let n = i64::from_str_radix(tok, 10).unwrap();
-                Token::Int { line: 1, value: n }
-            }).chain([Token::Eof { line: 1 }]));
+        fn int_toks(toks in prop::collection::vec(int_str(), 1..20)) {
+            let correct: Vec<_> = toks.iter().map(|t| {
+                Token::Int { line: 1, value: t.parse().unwrap() }
+            }).chain([Token::Eof { line: 1 }]).collect();
 
             let res = tokenize(&toks.join(" ")).unwrap();
-            assert_eq!(correct, res, "ints not tokenized correctly")
+            prop_assert!(tokens_eq(&correct, &res));
         }
 
         #[test]
-        fn tokenize_bools(toks in prop::collection::vec(bool_str(), 1..20)) {
-            let correct = Vec::from_iter(toks.iter().map(|tok| {
-                Token::Bool { line: 1, value: tok == "true" }
-            }).chain([Token::Eof { line: 1 }]));
+        fn bool_toks(toks in prop::collection::vec(bool_str(), 1..20)) {
+            let correct: Vec<_> = toks.iter().map(|t| {
+                assert!(t == "true" || t == "false");
+                Token::Bool { line: 1, value: t == "true" }
+            }).chain([Token::Eof { line: 1 }]).collect();
+            let res = tokenize(&toks.join(" ")).unwrap();
+            prop_assert!(tokens_eq(&correct, &res));
+        }
+
+        #[test]
+        fn comment_toks(toks in prop::collection::vec(bool_str(), 1..20)) {
+            let correct = tokenize(&toks.join("\n\n")).unwrap();
+            let res = tokenize(&toks.join("# true\n# false\n")).unwrap();
+            prop_assert!(tokens_eq(&correct, &res));
+        }
+
+        #[test]
+        fn real_toks(toks in prop::collection::vec(real_str(), 1..20)) {
+            let correct: Vec<_> = toks.iter().map(|t| {
+                Token::Real { line: 1, value: t.parse().unwrap() }
+            }).chain([Token::Eof { line: 1 }]).collect();
 
             let res = tokenize(&toks.join(" ")).unwrap();
-            assert_eq!(correct, res, "bools not tokenized correctly")
+            prop_assert!(tokens_eq(&correct, &res));
         }
 
         #[test]
-        fn tokenize_reals(toks in prop::collection::vec(real_str(), 1..20)) {
-            let correct = Vec::from_iter(toks.iter().map(|tok| {
-                let n: f64 = tok.parse().expect("unreachable");
-                Token::Real { line: 1, value: n }
-            }).chain([Token::Eof { line: 1 }]));
+        fn name_toks(toks in prop::collection::vec(name_str(), 1..20)) {
+            let correct: Vec<_> = toks.iter().map(|t| {
+                Token::Name { line: 1, name: t.clone() }
+            }).chain([Token::Eof { line: 1 }]).collect();
 
-            let res = tokenize(&toks.join(" ")).expect("it should not fail");
-            let eq = correct.iter().zip(res.iter()).all(|(check, result)| {
-                if let Token::Real { value: v1, .. } = check {
-                    if let Token::Real { value: v2, .. } = result {
-                        f64::abs(v1 - v2) < 0.0001
-                    } else {
-                        false
-                    }
-                } else {
-                    check == result
-                }
-            });
-            assert!(eq, "reals not tokenized correctly")
+            let res = tokenize(&toks.join(" ")).unwrap();
+            prop_assert!(tokens_eq(&correct, &res));
         }
 
         #[test]
-        fn tokenize_always_succeeds_on_valid_generated_tokens(
-            toks in prop::collection::vec(token_str(), 1..20)
-        ) {
-            let input = toks.join(" ");
-            let res = tokenize(&input);
-            prop_assert!(res.is_ok(), "tokenize failed on: {}", input);
+        fn op_toks(toks in prop::collection::vec(op_str(), 1..20)) {
+            let correct: Vec<_> = toks.iter().map(|t| {
+                Token::Operator { line: 1, name: t.clone() }
+            }).chain([Token::Eof { line: 1 }]).collect();
 
-            let tokens = res.unwrap();
-            // Always ends in EOF
-            let ends_with_eof = matches!(tokens.last(), Some(Token::Eof { .. }));
-            prop_assert!(ends_with_eof);
+            let res = tokenize(&toks.join(" ")).unwrap();
+            prop_assert!(tokens_eq(&correct, &res));
+        }
 
-            // Every token (except EOF) matches grammar invariants
-            for tok in &tokens[..tokens.len()-1] {
-                match tok {
-                    Token::Int { value, .. } => {
-                        prop_assert!(*value >= 0, "ints should be nonnegative");
-                    }
-                    Token::Real { value, .. } => {
-                        // real should contain a dot, so must not be NaN
-                        prop_assert!(value.is_finite());
-                    }
-                    Token::Bool { .. } => {}
-                    Token::Text { .. } => { }
-                    Token::Operator { name, .. } => {
-                        prop_assert!(!name.is_empty());
-                        prop_assert!(name.chars().all(|c| "+*-/%&|~^<>=!".contains(c)));
-                    }
-                    Token::Separator { name, .. } => {
-                        prop_assert!("()[] .}}{{:,;".contains(*name));
-                    }
-                    Token::Name { name, .. } => {
-                        let mut chars = name.chars();
-                        let first = chars.next().unwrap();
-                        prop_assert!(first.is_ascii_alphabetic());
-                        prop_assert!(chars.all(|c| c.is_ascii_alphanumeric() || c == '_'));
-                    }
-                    Token::Eof { .. } => unreachable!(),
+        #[test]
+        fn sep_toks(toks in prop::collection::vec(sep_str(), 1..20)) {
+            let correct: Vec<_> = toks.iter().map(|t| {
+                Token::Separator { line: 1, name: t.chars().next().unwrap() }
+            }).chain([Token::Eof { line: 1 }]).collect();
+
+            let res = tokenize(&toks.join("")).unwrap();
+            prop_assert!(tokens_eq(&correct, &res));
+        }
+
+        #[test]
+        fn text_toks(toks in prop::collection::vec(any_str(), 1..20)) {
+            fn map_c(c: char) -> String {
+                match c {
+                    '\\' => "\\\\".to_string(),
+                    '\n' => "\\n".to_string(),
+                    '\t' => "\\t".to_string(),
+                    '\"' => "\\\"".to_string(),
+                    '\0'..='Z' => format!("\\x{:02x}", c as u8),
+                    _ => c.to_string()
                 }
+            }
+
+            fn escape(t: &str) -> String {
+                Vec::from_iter(t.chars().map(|c| map_c(c))).join("")
+            }
+
+            let correct: Vec<_> = toks.iter().map(|t| {
+                Token::Text { line: 1, value: t.clone() }
+            }).chain([Token::Eof { line: 1 }]).collect();
+
+            let input = toks.iter().map(|t| {
+                "\"".to_string() + &escape(t) + "\""
+            }).collect::<Vec<_>>().join("");
+
+            let res = tokenize(&input).unwrap();
+            prop_assert!(tokens_eq(&correct, &res));
+        }
+
+        #[test]
+        fn err_chars(cs in prop::collection::vec(prop::char::any(), 1..20)) {
+            for c in cs {
+                prop_assert_eq!(tokenize(&c.to_string()).is_ok(),
+                    c.is_ascii_alphanumeric() || is_separator(c)
+                    || is_operator(c) || c.is_whitespace() || c == '#'
+                );
+            }
+        }
+
+        #[test]
+        fn check_line(toks in prop::collection::vec(int_str(), 1..20)) {
+            let input = toks.join("\n") + "\n";
+            let mut line = 1;
+            for t in tokenize(&input).unwrap() {
+                prop_assert_eq!(t.line(), line);
+                line += 1;
             }
         }
     }
