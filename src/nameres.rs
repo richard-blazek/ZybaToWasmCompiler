@@ -692,6 +692,27 @@ mod nameres_tests {
     }
 
     #[test]
+    fn test_reassign_const_is_error() {
+        let modules = HashMap::from_iter([
+            ("main.zyba".to_string(), vec![
+                const_decl("main", Expr::Lambda {
+                    line: 1,
+                    args: vec![],
+                    return_type: Box::new(var("Int")),
+                    body: vec![
+                        Expr::Assign {
+                            line: 1,
+                            name: "main".to_string(),
+                            expr: Box::new(int(1))
+                        },
+                    ]
+                }, false)
+            ])
+        ]);
+        name_resolution("main.zyba".into(), modules).expect_err("cannot assign to constant");
+    }
+
+    #[test]
     fn test_no_main_function_is_error() {
         let modules = HashMap::from_iter([("main.zyba".into(), vec![])]);
         name_resolution("main.zyba".into(), modules).expect_err("No main function");
