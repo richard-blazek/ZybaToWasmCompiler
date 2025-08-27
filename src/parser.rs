@@ -4,21 +4,19 @@ use crate::builtin::is_builtin_operator;
 use crate::error::{err, Fallible};
 use crate::lexer::{Token, tokenize};
 
-/*
-<file> ::= <decl>*
-<decl> ::= <import> | <const>
-<expr> ::= (<name> "=")? <binop>
-<binop> ::= <operand> (<operator> <operand>)*
-<operand> ::= <atom> ("." <name> | "[" (<expr> ("," <expr>)*)? "]")*
-<atom> ::= <int> | <real> | <text> | <bool> | <record> | <var> | <lambda> | <if> | <while> | <for>
-<record> ::= "(" ")" | "(" <name> ":" <expr> ("," <name> ":" <expr>)* ")"
-<var> ::= <name> ("::" <name>)?
-<lambda> ::= "fun" "[" (<name> ":" <expr> ("," <name> ":" <expr>)*)? "]" <block>
-<block> ::= "{" <expr>* "}"
-<if> ::= "if" <expr> <block> ("else if" <expr> <block>)* ("else" <block>)?
-<while> ::= "while" <expr> <block>
-<for> ::= "for" <name> ("," <name>)? ":" <expr> <block>
-*/
+// <file> ::= (<decl> ";")*
+// <decl> ::= <import> | <const>
+// <expr> ::= (<name> "=")? <binop>
+// <binop> ::= <operand> (<operator> <operand>)*
+// <operand> ::= <atom> ("." <name> | "[" (<expr> ("," <expr>)*)? "]")*
+// <atom> ::= <int> | <real> | <text> | <bool> | <record> | <var> | <lambda> | <if> | <while> | <for>
+// <record> ::= "(" ")" | "(" <name> ":" <expr> ("," <name> ":" <expr>)* ")"
+// <var> ::= <name> ("::" <name>)?
+// <lambda> ::= "fun" "[" (<name> ":" <expr> ("," <name> ":" <expr>)*)? "]" <expr> <block>
+// <block> ::= "{" (<expr> ";")* "}"
+// <if> ::= "if" <expr> <block> ("elif" <expr> <block>)* ("else" <block>)?
+// <while> ::= "while" <expr> <block>
+// <for> ::= "for" <name> ("," <name>)? ":" <expr> <block>
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -322,11 +320,7 @@ fn parse_declaration(tokens: &[Token], i: usize) -> Fallible<(usize, Decl)> {
 }
 
 fn is_eof(token: &Token) -> bool {
-    if let Token::Eof { .. } = token {
-        true
-    } else {
-        false
-    }
+    matches!(token, Token::Eof { .. })
 }
 
 fn parse_tokens(tokens: &[Token]) -> Fallible<Vec<Decl>> {
@@ -342,4 +336,332 @@ fn parse_tokens(tokens: &[Token]) -> Fallible<Vec<Decl>> {
 
 pub fn parse(input: &str) -> Fallible<Vec<Decl>> {
     parse_tokens(&tokenize(input)?)
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_empty_file() {
+        let got = parse("").expect("empty input should parse");
+        assert!(got.is_empty(), "empty input should produce zero declarations");
+    }
+
+    #[test]
+    fn test_errors() {
+        parse("x = 1").expect_err("missing semicolon");
+        parse("x = for +item : vec {};").expect_err("unexpected operator");
+        parse("x = for k, +v : map {};").expect_err("unexpected operator");
+        parse("x = +123").expect_err("no unary operators");
+        parse("x = (a: 5, a: 6);").expect_err("duplicate name");
+        parse("x = (a: 5 b: 6);").expect_err("expected a comma");
+        parse("x = record.+field;").expect_err("expected a name");
+        parse("x = (a: 5, \"b\": 6);").expect_err("expected a name");
+        parse("x = 123 ^^^ 123;").expect_err("invalid operator");
+        parse("x = sqrt[3.14 y];").expect_err("unexpected name");
+        parse("123 = x;").expect_err("invalid decl");
+        parse("private 123 = x;").expect_err("extremely invalid decl");
+        parse("x = (a: 1,").expect_err("unterminated record");
+        parse("if true { 1").expect_err("missing closing brace");
+        parse("for : arr { }").expect_err("missing loop variable");
+        parse("import").expect_err("incomplete import");
+    }
+
+    #[test]
+    fn test_import_and_const() {
+        let src = r#" import "lib/foo"; x = 123; "#;
+
+        let parsed = parse(src).expect("parse failed");
+        assert_eq!(parsed.len(), 2);
+
+        assert!(matches!(parsed[0].clone(), Decl::Import {
+            path, ..
+        } if path == "lib/foo"));
+
+        assert!(matches!(parsed[1].clone(), Decl::Const {
+            name,
+            expr: Expr::Int { value, .. },
+            ..
+        } if name == "x" && value == 123));
+    }
+
+    #[test]
+    fn test_atoms_int_real_text_bool() {
+        use Decl::Const;
+        use Expr::{Int, Real, Text, Bool};
+
+        let src = r#"
+            private a = 123;
+            b = 3.14;
+            c = "abyz";
+            d = true;
+        "#;
+
+        let parsed = parse(src).expect("parse atoms");
+        assert_eq!(parsed.len(), 4);
+
+        assert!(matches!(&parsed[0], Const { name, expr: Int { value: 123, .. }, private: true, .. } if name == "a"));
+        assert!(matches!(&parsed[1], Const { name, expr: Real { value: 3.14, .. }, private: false, .. } if name == "b"));
+        assert!(matches!(&parsed[2], Const { name, expr: Text { value, .. }, private: false, .. } if name == "c" && value == "abyz"));
+        assert!(matches!(&parsed[3], Const { name, expr: Bool { value: true, .. }, private: false, .. } if name == "d"));
+    }
+
+    #[test]
+    fn test_records_empty_and_fields() {
+        let src = r#" r0 = (); r1 = (a: 123, b: 3.14); "#;
+        let parsed = parse(src).expect("parse records");
+
+        let mut map = HashMap::new();
+        for d in parsed.iter() {
+            if let Decl::Const { name, expr, .. } = d {
+                map.insert(name.clone(), expr.clone());
+            }
+        }
+
+        assert_eq!(map.get("r0"), Some(&Expr::Record { line: 1, fields: HashMap::new() }));
+
+        let mut fields = HashMap::new();
+        fields.insert("a".to_string(), Expr::Int { line: 1, value: 123 });
+        fields.insert("b".to_string(), Expr::Real { line: 1, value: 3.14 });
+        assert_eq!(map.get("r1"), Some(&Expr::Record { line: 1, fields }));
+    }
+
+    #[test]
+    fn test_var_with_namespace_and_access() {
+        let src = r#" v = ns::id; a = ns::obj.field; "#;
+        let parsed = parse(src).expect("parse ns var and access");
+
+        if let Decl::Const { name, expr, .. } = &parsed[0] && name == "v" {
+            assert_eq!(*expr, Expr::Var { line: 1, ns: Some("ns".to_string()), name: "id".to_string() });
+        } else {
+            panic!("v not parsed correctly")
+        }
+
+        if let Decl::Const { name, expr, .. } = &parsed[1] && name == "a" {
+            let obj = Expr::Var { line: 1, ns: Some("ns".to_string()), name: "obj".to_string() };
+            assert_eq!(*expr, Expr::Access { line: 1, object: Box::new(obj), field: "field".to_string() });
+        } else {
+            panic!("a not parsed correctly")
+        }
+    }
+
+    #[test]
+    fn test_binop_left_associative_and_assignment_expr() {
+        // Tests: assignment with chain binops a = 1 + 2 + 3
+        let src = r#" assign_me = a = (1 + 2) + 3; "#;
+        let parsed = parse(src).expect("parse binop assign");
+
+        let c = match parsed[0].clone() {
+            Decl::Const { name, expr, .. } if name == "assign_me" => expr,
+          _ => panic!("assign_me const not found"),
+        };
+
+        match c {
+            Expr::Assign { name, expr, .. } => {
+                assert_eq!(name, "a");
+
+                match *expr {
+                    Expr::BinOp { name: op1, lhs, rhs, .. } => {
+                        assert_eq!(op1, "+");
+                        match *lhs {
+                            Expr::BinOp { name: op2, lhs: lhs2, rhs: rhs2, .. } => {
+                                assert_eq!(op2, "+");
+                                assert_eq!(*lhs2, Expr::Int { line: 1, value: 1 });
+                                assert_eq!(*rhs2, Expr::Int { line: 1, value: 2 });
+                            }
+                            _ => panic!("left of top-level + is not a binop"),
+                        }
+                        assert_eq!(*rhs, Expr::Int { line: 1, value: 3 });
+                    }
+                    _ => panic!("assignment rhs not a BinOp"),
+                }
+            }
+            _ => panic!("expected assignment expression"),
+        }
+    }
+
+    #[test]
+    fn test_access_and_indexing_chained() {
+        let src = r#" x = a.b[1, 2].c[]; "#;
+        let parsed = parse(src).expect("parse access/indexing chain");
+        let expr = parsed.into_iter().find_map(|d| match d {
+            Decl::Const { name, expr, .. } if name == "x" => Some(expr),
+            _ => None,
+        }).expect("const x missing");
+
+        let expected = Expr::Call {
+            line: 1, func: Box::new(Expr::Access {
+                line: 1,
+                object: Box::new(Expr::Call {
+                    line: 1,
+                    func: Box::new(Expr::Access { 
+                        line: 1,
+                        object: Box::new(Expr::Var {
+                            line: 1,
+                            ns: None,
+                            name: "a".to_string()
+                        }),
+                        field: "b".to_string()
+                    }),
+                    args: vec![
+                        Expr::Int { line: 1, value: 1 },
+                        Expr::Int { line: 1, value: 2 }
+                    ],
+                }),
+                field: "c".to_string()
+            }), args: vec![]
+        };
+        assert_eq!(expr.clone(), expected);
+    }
+
+    #[test]
+    fn test_if_else_chain() {
+        let src = r#"
+            c = if true { 1; } elif false { 2; } else { 3; };
+            d = if true { 1; };
+        "#;
+        let parsed = parse(src).expect("parse if else chain");
+        assert_eq!(parsed.len(), 2);
+
+        let c = match &parsed[0] {
+            Decl::Const { name, expr, .. } if name == "c" => expr.clone(),
+            _ => panic!("c expected")
+        };
+
+        let d = match &parsed[1] {
+            Decl::Const { name, expr, .. } if name == "d" => expr.clone(),
+            _ => panic!("d expected")
+        };
+
+        match c {
+            Expr::If { cond, then, elsë, .. } => {
+                assert!(matches!(*cond, Expr::Bool { value: true, .. }));
+                assert!(matches!(&then[..], &[Expr::Int { value: 1, .. }]));
+                assert_eq!(elsë.len(), 1);
+                match elsë[0].clone() {
+                    Expr::If { cond, then, elsë, .. } => {
+                        assert!(matches!(*cond, Expr::Bool { value: false, .. }));
+                        assert!(matches!(&then[..], &[Expr::Int { value: 2, .. }]));
+                        assert!(matches!(&elsë[..], &[Expr::Int { value: 3, .. }]));
+                    }
+                    _ => panic!("should be if")
+                }
+            }
+            _ => panic!("should be if")
+        }
+
+        match d {
+            Expr::If { cond, then, elsë, .. } => {
+                assert!(matches!(*cond, Expr::Bool { value: true, .. }));
+                assert!(matches!(&then[..], &[Expr::Int { value: 1, .. }]));
+                assert!(elsë.is_empty());
+            }
+            _ => panic!("should be if")
+        }
+    }
+
+    #[test]
+    fn test_while_and_for_loops() {
+        let src = r#" w = while true { 1 }; f1 = for v: arr { v }; f2 = for k, v: map { k }; "#;
+        let parsed = parse(src).expect("parse loops");
+        let mut found = std::collections::HashMap::new();
+        for d in parsed.iter() {
+            if let Decl::Const { name, expr, .. } = d {
+                found.insert(name.clone(), expr.clone());
+            }
+        }
+
+        match found.get("w") {
+            Some(Expr::While { cond, body, .. }) => {
+                assert_eq!(**cond, Expr::Bool { line: 1, value: true });
+                assert_eq!(body, &vec![Expr::Int { line: 1, value: 1 }]);
+            }
+            _ => panic!("w not parsed into While"),
+        }
+
+        match found.get("f1") {
+            Some(Expr::For { key, value, expr, body, .. }) => {
+                assert_eq!(key, &None);
+                assert_eq!(value, "v");
+                assert_eq!(**expr, Expr::Var { line: 1, ns: None, name: "arr".to_string() });
+                assert_eq!(body, &vec![Expr::Var { line: 1, ns: None, name: "v".to_string() }]);
+            }
+            _ => panic!("f1 not parsed into For"),
+        }
+
+        match found.get("f2") {
+            Some(Expr::For { key, value, expr, body, .. }) => {
+                assert_eq!(key, &Some("k".to_string()));
+                assert_eq!(value, "v");
+                assert_eq!(**expr, Expr::Var { line: 1, ns: None, name: "map".to_string() });
+                assert_eq!(body, &vec![Expr::Var { line: 1, ns: None, name: "k".to_string() }]);
+            }
+            _ => panic!("f2 not parsed into For"),
+        }
+    }
+
+    #[test]
+    fn test_lambda_parsing_structure() {
+        // We assert structural properties rather than exact equality of return_type field.
+        let src = r#" L = fun [x: int, y: real] int { x = x + 1 }; "#;
+        let parsed = parse(src).expect("parse lambda");
+        let lambda_expr = parsed.into_iter().find_map(|d| match d {
+            Decl::Const { name, expr, .. } if name == "L" => Some(expr),
+            _ => None,
+        }).expect("const L not found");
+
+        match lambda_expr.clone() {
+            Expr::Lambda { args, return_type: _rt, body, .. } => {
+                // args should include x and y with their types (we used 123 and 3.14 as dummy type expressions in source)
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0].0, "x");
+                assert_eq!(args[1].0, "y");
+                // body should contain an assignment expression
+                assert_eq!(body.len(), 1);
+                match &body[0] {
+                    Expr::Assign { name, expr, .. } => {
+                        assert_eq!(name, "x");
+                        // rhs should be BinOp
+                        match **expr {
+                            Expr::BinOp { name: ref op, .. } => assert_eq!(op, "+"),
+                            _ => panic!("lambda assignment rhs is not binop"),
+                        }
+                    }
+                    _ => panic!("lambda body not an assign"),
+                }
+            }
+            _ => panic!("expected Lambda expression"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_declarations_and_block_with_multiple_exprs() {
+        let src = r#"
+            import "top";
+            a = 1;
+            b = fun [] () { 1; 2; 3; };
+            c = 3.14;
+        "#;
+        let parsed = parse(src).expect("parse multi-decls");
+
+        assert_eq!(parsed.len(), 4);
+
+        match &parsed[0] {
+            Decl::Import { path, .. } => assert_eq!(path, "top"),
+            _ => panic!("should be import")
+        }
+
+        match &parsed[2] {
+            Decl::Const { name, expr: Expr::Lambda { body, .. }, .. } => {
+                assert_eq!(name, "b");
+                assert_eq!(body.len(), 3);
+                assert!(matches!(body[0], Expr::Int { value: 1, .. }));
+                assert!(matches!(body[1], Expr::Int { value: 2, .. }));
+                assert!(matches!(body[2], Expr::Int { value: 3, .. }));
+            }
+            _ => panic!("should be lambda")
+        }
+    }
 }

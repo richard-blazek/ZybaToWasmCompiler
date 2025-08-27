@@ -1,17 +1,15 @@
 use crate::error::{Fallible, err};
 
-/*
-<int> ::= [0-9]+
-<real> ::= <int> "." [0-9]*
-<bool> ::= "true" | "false"
-<text> ::= "\"" <text_char>* "\""
-<text_char> ::= [^"\\] | <text_esc>
-<text_esc> ::= "\\\"" | "\\n" | "\\t" | "\\x" <text_hex> <text_hex>
-<text_hex> ::= [0-9a-fA-F]
-<operator> ::= [+*-/%&|~^<>=!]+
-<separator> ::= [\(\)\[\]\.\{\}:,;]
-<name> ::= [a-zA-Z] [a-zA-Z0-9_]
-*/
+// <int> ::= [0-9]+
+// <real> ::= <int> "." [0-9]*
+// <bool> ::= "true" | "false"
+// <text> ::= "\"" <text_char>* "\""
+// <text_char> ::= [^"\\] | <text_esc>
+// <text_esc> ::= "\\\"" | "\\n" | "\\t" | "\\x" <text_hex> <text_hex>
+// <text_hex> ::= [0-9a-fA-F]
+// <operator> ::= [+*-/%&|~^<>=!]+
+// <separator> ::= [\(\)\[\]\.\{\}:,;]
+// <name> ::= [a-zA-Z] [a-zA-Z0-9_]
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
