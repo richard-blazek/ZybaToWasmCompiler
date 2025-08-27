@@ -270,7 +270,11 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
             body: nameres_exprs(body, ns_path, LocalEnv::new_scope(env))?
         }),
         Expr::For { line, key, value, expr, body } => {
-            let expr = nameres_expr(*expr, ns_path, &mut LocalEnv::new_scope(env))?;
+            let expr = nameres_expr(
+                *expr,
+                ns_path,
+                &mut LocalEnv::new_scope(env)
+            )?;
             let mut inner = LocalEnv::new_scope(env);
             let key = if let Some(key) = key {
                 builtin_check(line, &key)?;
@@ -467,6 +471,122 @@ mod name_resolution_tests {
             func: Box::new(Var { line: 1, name: "print".to_string() }),
             args: vec![Var { line: 1, name: str_key }]
         }).is_some());
+    }
+
+    #[test]
+    fn test_if() {
+        use Value::*;
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "main.zyba".to_string(),
+            vec![
+                const_decl("main", Expr::If {
+                    line: 1,
+                    cond: Box::new(bool()),
+                    then: vec![int(321)],
+                    elsë: vec![int(123)]
+                }, false),
+            ]
+        );
+
+        let (main_name, table) = name_resolution("main.zyba".into(), modules).unwrap();
+
+        match table.get(&main_name).expect("missing main") {
+            If { cond, then, elsë, .. } => {
+                assert_eq!(**cond, Bool { line: 1, value: true });
+                assert_eq!(then[0], Int { line: 1, value: 321 });
+                assert_eq!(elsë[0], Int { line: 1, value: 123 });
+            }
+            _ => panic!("should resolve to if")
+        }
+    }
+
+    #[test]
+    fn test_while() {
+        use Value::*;
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "main.zyba".to_string(),
+            vec![
+                const_decl("main", Expr::While {
+                    line: 1,
+                    cond: Box::new(bool()),
+                    body: vec![int(777)],
+                }, false),
+            ]
+        );
+
+        let (main_name, table) = name_resolution("main.zyba".into(), modules).unwrap();
+
+        match table.get(&main_name).expect("missing main") {
+            While { cond, body, .. } => {
+                assert_eq!(**cond, Bool { line: 1, value: true });
+                assert_eq!(body[0], Int { line: 1, value: 777 });
+            }
+            _ => panic!("should resolve to while")
+        }
+    }
+
+    #[test]
+    fn test_for() {
+        use Value::*;
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "main.zyba".to_string(),
+            vec![
+                const_decl("main", Expr::For {
+                    line: 1,
+                    key: None,
+                    value: "item".to_string(),
+                    expr: Box::new(int(20)),
+                    body: vec![var("item")],
+                }, false),
+                const_decl("foo", Expr::For {
+                    line: 1,
+                    key: Some("key".to_string()),
+                    value: "value".to_string(),
+                    expr: Box::new(int(20)),
+                    body: vec![var("key"), var("value")],
+                }, false),
+            ]
+        );
+
+        let (main_name, table) = name_resolution("main.zyba".into(), modules).unwrap();
+
+        match table.get(&main_name).expect("missing main") {
+            For { key, value, body, expr, .. } => {
+                assert_ne!(key, value);
+                assert!(matches!(*expr.clone(), Int { value: 20, .. }));
+                assert_eq!(body[0], Var { line: 1, name: value.clone() });
+            }
+            _ => panic!("should resolve to for")
+        }
+
+        match table.iter().filter(|(k, _)| **k != main_name).next() {
+            Some((_, For { key, value, body, expr, .. })) => {
+                assert_ne!(key, value);
+                assert!(matches!(*expr.clone(), Int { value: 20, .. }));
+                assert_eq!(body[0], Var { line: 1, name: key.clone() });
+                assert_eq!(body[1], Var { line: 1, name: value.clone() });
+            }
+            _ => panic!("foo not found")
+        }
+
+        let modules = HashMap::from_iter([
+            ("main.zyba".to_string(), vec![
+                const_decl("main", Expr::For {
+                    line: 1,
+                    key: Some("item".to_string()),
+                    value: "item".to_string(),
+                    expr: Box::new(int(20)),
+                    body: vec![var("item")],
+                }, false),
+            ])
+        ]);
+        name_resolution("main.zyba".into(), modules).expect_err("duplicate var name");
     }
 
     #[test]
