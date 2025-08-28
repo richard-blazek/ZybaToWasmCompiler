@@ -304,3 +304,301 @@ pub fn check(globals: HashMap<String, nameres::Value>) -> Fallible<HashMap<Strin
         Ok((name, check_value(value, &mut env)?))
     }).collect()
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nameres;
+    use std::collections::HashMap;
+
+    // Helper functions to create nameres::Value variants for tests
+    mod helpers {
+        use super::*;
+        use nameres::Value;
+
+        pub fn int(value: i64) -> Value { Value::Int { line: 1, value } }
+        pub fn real(value: f64) -> Value { Value::Real { line: 1, value } }
+        pub fn text(value: &str) -> Value { Value::Text { line: 1, value: value.to_string() } }
+        pub fn bool(value: bool) -> Value { Value::Bool { line: 1, value } }
+        pub fn var(name: &str) -> Value { Value::Var { line: 1, name: name.to_string() } }
+        pub fn call(func: &str, args: Vec<Value>) -> Value {
+            Value::Call { line: 1, func: Box::new(var(func)), args }
+        }
+        pub fn bin_op(name: &str, lhs: Value, rhs: Value) -> Value {
+            Value::BinOp { line: 1, name: name.to_string(), lhs: Box::new(lhs), rhs: Box::new(rhs) }
+        }
+        pub fn record(fields: Vec<(&str, Value)>) -> Value {
+            Value::Record { line: 1, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
+        }
+        pub fn access(obj: Value, field: &str) -> Value {
+            Value::Access { line: 1, object: Box::new(obj), field: field.to_string() }
+        }
+        pub fn init(name: &str, value: Value) -> Value {
+            Value::Init { line: 1, name: name.to_string(), value: Box::new(value) }
+        }
+        pub fn assign(name: &str, value: Value) -> Value {
+            Value::Assign { line: 1, name: name.to_string(), value: Box::new(value) }
+        }
+        pub fn lambda(args: Vec<(&str, Value)>, ret_type: Value, body: Vec<Value>) -> Value {
+            Value::Lambda {
+                line: 1,
+                args: args.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
+                return_type: Box::new(ret_type),
+                body,
+            }
+        }
+        pub fn if_expr(cond: Value, then: Vec<Value>, elsë: Vec<Value>) -> Value {
+            Value::If { line: 1, cond: Box::new(cond), then, elsë }
+        }
+        pub fn while_loop(cond: Value, body: Vec<Value>) -> Value {
+            Value::While { line: 1, cond: Box::new(cond), body }
+        }
+        pub fn for_loop(key: &str, value: &str, expr: Value, body: Vec<Value>) -> Value {
+            Value::For { line: 1, key: key.to_string(), value: value.to_string(), expr: Box::new(expr), body }
+        }
+
+        pub fn wrap_in_lambda(value: Value) -> Value {
+            lambda(vec![], record(vec![]), vec![value])
+        }
+    }
+
+    use helpers::*;
+
+    pub fn unwrap_lambda(value: &Value) -> Value {
+        match value {
+            Value::Lambda { body, .. } => body[0].clone(),
+            _ => panic!("it should be lambda")
+        }
+    }
+
+    #[test]
+    fn test_literals_and_records() {
+        let globals = HashMap::from([
+            ("my_int".to_string(), int(10)),
+            ("my_real".to_string(), real(3.14)),
+            ("my_text".to_string(), text("hello")),
+            ("my_bool".to_string(), bool(true)),
+            ("my_record".to_string(), lambda(
+                vec![],
+                record(vec![("a", var("Int")), ("b", var("Bool"))]),
+                vec![record(vec![("a", int(1)), ("b", bool(false))])]
+            )),
+        ]);
+
+        let typed_globals = check(globals).unwrap();
+        assert_eq!(typed_globals["my_int"].tpe(), Type::Int);
+        assert_eq!(typed_globals["my_real"].tpe(), Type::Real);
+        assert_eq!(typed_globals["my_text"].tpe(), Type::Text);
+        assert_eq!(typed_globals["my_bool"].tpe(), Type::Bool);
+        assert_eq!(typed_globals["my_record"].tpe(), Type::Func {
+            args: vec![],
+            return_type: Box::new(Type::Record {
+                fields: HashMap::from([
+                    ("a".to_string(), Type::Int),
+                    ("b".to_string(), Type::Bool),
+                ])
+            })
+        });
+    }
+
+    #[test]
+    fn test_assignment_and_vars() {
+        let globals = HashMap::from([
+            ("main".to_string(), lambda(vec![], var("Int"), vec![
+                init("x", int(5)),
+                assign("x", int(10)),
+                var("x"),
+            ])),
+        ]);
+        let typed_globals = check(globals).unwrap();
+        if let Value::Lambda { body, .. } = &typed_globals["main"] {
+            assert!(matches!(body[0], Value::Init { .. }));
+            assert_eq!(body[0].tpe(), Type::Int);
+            assert!(matches!(body[1], Value::Assign { .. }));
+            assert_eq!(body[1].tpe(), Type::Int);
+            assert!(matches!(body[2], Value::Var { .. }));
+            assert_eq!(body[2].tpe(), Type::Int);
+        } else {
+            panic!("Expected lambda");
+        }
+    }
+
+    #[test]
+    fn test_binary_operators() {
+        let ops = vec![
+            ("*", int(1), int(2), Type::Int),
+            ("+", real(1.0), real(2.0), Type::Real),
+            ("*", real(1.0), real(2.0), Type::Real),
+            ("/", real(1.0), real(2.0), Type::Real),
+            ("%", int(1), int(2), Type::Int),
+            ("+", text("a"), text("b"), Type::Text),
+            ("-", real(1.0), real(2.0), Type::Real),
+            ("==", bool(true), bool(false), Type::Bool),
+            ("!=", text("a"), text("b"), Type::Bool),
+            ("<", int(1), int(2), Type::Bool),
+            ("<=", real(1.0), real(2.0), Type::Bool),
+            (">", text("a"), text("b"), Type::Bool),
+            (">=", int(1), int(2), Type::Bool),
+            ("&", bool(true), bool(false), Type::Bool),
+            ("|", bool(true), bool(false), Type::Bool),
+            ("|", int(1), int(2), Type::Int),
+            ("^", bool(true), bool(false), Type::Bool),
+            ("|", record(vec![("a", int(1))]), record(vec![("b", int(2))]), Type::Record {
+                fields: HashMap::from([("a".to_string(), Type::Int), ("b".to_string(), Type::Int)]),
+            }),
+        ];
+
+        for (op, lhs, rhs, tpe) in ops {
+            let globals = HashMap::from([("op".to_string(), wrap_in_lambda(bin_op(op, lhs, rhs)))]);
+            let op = unwrap_lambda(&check(globals).unwrap()["op"]);
+            assert_eq!(op.tpe(), tpe);
+        }
+    }
+
+    #[test]
+    fn test_builtin_functions() {
+        let calls = vec![
+            (call("int", vec![real(1.0)]), Type::Int),
+            (call("real", vec![int(1)]), Type::Real),
+            (call("text", vec![bool(true)]), Type::Text),
+            (call("bool", vec![int(0)]), Type::Bool),
+            (call("list", vec![var("Int"), int(1), int(2)]), Type::List { item: Box::new(Type::Int) }),
+            (call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), Type::Dict { key: Box::new(Type::Text), value: Box::new(Type::Int) }),
+            (call("not", vec![bool(true)]), Type::Bool),
+            (call("print", vec![text("a")]), Type::Record { fields: HashMap::new() }),
+            (call("len", vec![call("list", vec![var("Int")])]), Type::Int),
+            (call("has", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Bool),
+            (call("has", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Bool),
+            (call("get", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Int),
+            (call("get", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Int),
+            (call("set", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), Type::Record { fields: HashMap::new() }),
+            (call("del", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a"), int(1)]), Type::Record { fields: HashMap::new() }),
+            (call("insert", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), Type::Record { fields: HashMap::new() }),
+        ];
+
+        for (c, tpe) in calls {
+            let globals = HashMap::from([
+                ("call".to_string(), wrap_in_lambda(c))
+            ]);
+
+            let call = unwrap_lambda(&check(globals).unwrap()["call"]);
+            assert_eq!(call.tpe(), tpe);
+        }
+    }
+
+    #[test]
+    fn test_access() {
+        let globals = HashMap::from([
+            ("a".to_string(), wrap_in_lambda(access(record(vec![("b", int(1))]), "b")))
+        ]);
+
+        let a = unwrap_lambda(&check(globals).unwrap()["a"]);
+        assert_eq!(a.tpe(), Type::Int);
+    }
+
+    #[test]
+    fn test_control_flow() {
+        // If with same types
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(if_expr(bool(true), vec![int(1)], vec![int(2)])))]);
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Int);
+
+        // If with different types -> void
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(if_expr(bool(true), vec![int(1)], vec![text("a")])))]);
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+        
+        // If with one empty branch -> void
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(if_expr(bool(true), vec![int(1)], vec![])))]);
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+
+        // While loop
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(while_loop(bool(true), vec![int(1)])))]);
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+
+        // For loop over list
+        let list = call("list", vec![var("Int"), int(1)]);
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", list, vec![var("v")])))]);
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+
+        // For loop over dict
+        let dict = call("dict", vec![var("Text"), var("Real"), text("a"), real(1.0)]);
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", dict, vec![var("k"), var("v")])))]);
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+    }
+
+    #[test]
+    fn test_lambda_and_calls() {
+        let my_func = lambda(vec![("x", var("Int"))], var("Int"), vec![var("x")]);
+        let globals = HashMap::from([
+            ("my_func".to_string(), my_func),
+            ("result".to_string(), lambda(vec![], var("Int"), vec![call("my_func", vec![int(42)])])) 
+        ]);
+
+        let typed = check(globals).unwrap();
+        assert_eq!(typed["result"].tpe(), Type::Func {
+            args: vec![],
+            return_type: Box::new(Type::Int)
+        });
+    }
+
+    #[test]
+    fn test_error_cases() {
+        // Invalid type name
+        check(HashMap::from([("a".to_string(), lambda(vec![], var("Foo"), vec![]))])).expect_err("Invalid type name");
+
+        // Invalid generic type
+        check(HashMap::from([("a".to_string(), lambda(vec![], call("Foo", vec![var("Int")]), vec![]))])).expect_err("Invalid generic type");
+        
+        // Returns (), but expects List[List[Int]]
+        check(HashMap::from([("a".to_string(), lambda(vec![], call("List", vec![call("List", vec![var("Int")])]), vec![]))])).expect_err("Missing return");
+        
+        // Repeated brackets in type
+        check(HashMap::from([("a".to_string(), lambda(vec![], nameres::Value::Call { line: 1, func: Box::new(call("List", vec![var("Int")])), args: vec![] }, vec![]))])).expect_err("Repeated brackets");
+
+        // Invalid type expression
+        check(HashMap::from([("a".to_string(), lambda(vec![], int(1), vec![]))])).expect_err("Invalid type expression");
+
+        // Global not a literal or function
+        check(HashMap::from([("a".to_string(), bin_op("+", int(1), int(2)))])).expect_err("Global not literal/func");
+
+        // Mismatched assignment
+        let globals = HashMap::from([("a".to_string(), lambda(vec![], var("Int"), vec![init("x", int(1)), assign("x", bool(true))]))]);
+        check(globals).expect_err("Mismatched assignment");
+
+        // Accessing field on non-record
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(access(int(1), "field")))]);
+        check(globals).expect_err("Access non-record");
+
+        // Accessing non-existent field
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(access(record(vec![]), "field")))]);
+        check(globals).expect_err("Access non-existent field");
+
+        // For loop on non-iterable
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", int(1), vec![])))]);
+        check(globals).expect_err("For on non-iterable");
+
+        // Mismatched lambda return type
+        let globals = HashMap::from([("a".to_string(), lambda(vec![], var("Int"), vec![bool(true)]))]);
+        check(globals).expect_err("Mismatched return type");
+
+        // Wrong number of arguments
+        let globals = HashMap::from([("f".to_string(), lambda(vec![("x", var("Int"))], var("Int"), vec![])), ("c".to_string(), wrap_in_lambda(call("f", vec![])))]);
+        check(globals).expect_err("Wrong arg count");
+        
+        // Wrong argument type
+        let globals = HashMap::from([("f".to_string(), lambda(vec![("x", var("Int"))], var("Int"), vec![])), ("c".to_string(), wrap_in_lambda(call("f", vec![bool(true)])))]);
+        check(globals).expect_err("Wrong arg type");
+
+        // Calling a non-function
+        let globals = HashMap::from([("f".to_string(), int(1)), ("c".to_string(), wrap_in_lambda(call("f", vec![])))]);
+        check(globals).expect_err("Calling non-function");
+
+        // Invalid builtin call
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(call("list", vec![var("Int"), bool(true)])))]);
+        check(globals).expect_err("Invalid builtin call");
+
+        // Invalid binary operation
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(bin_op("+", int(1), bool(true))))]);
+        check(globals).expect_err("Invalid binary op");
+    }
+}
