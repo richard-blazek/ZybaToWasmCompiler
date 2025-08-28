@@ -300,54 +300,80 @@ impl Env {
     }
 }
 
-fn code_value(value: Value, env: &mut Env) -> Vec<Instr> {
+fn code_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     use Value::*;
 
     match value {
-        Int { value, .. } => vec![Instr::PushInt { value }],
-        Real { value, .. } => vec![Instr::PushReal { value }],
-        Text { value, .. } => vec![Instr::PushText { value }],
-        Bool { value, .. } => vec![Instr::PushBool { value }],
-        Var { name, tpe } => vec![
+        Int { value, .. } => (vec![Instr::PushInt { value }], vec![]),
+        Real { value, .. } => (vec![Instr::PushReal { value }], vec![]),
+        Text { value, .. } => (vec![Instr::PushText { value }], vec![]),
+        Bool { value, .. } => (vec![Instr::PushBool { value }], vec![]),
+        Var { name, tpe } => {
             if env.is_global(&name) {
-                env.fetch_global(&name)
+                (vec![env.fetch_global(&name)], vec![])
             } else {
                 let tpe = conv_type(tpe);
                 let id = env.local_id_by_name(&name);
-                Instr::GetLocal { id, tpe }
+                (vec![Instr::GetLocal { id, tpe }], vec![])
             }
-        ],
+        }
         Assign { name, value, .. } => {
             let tpe = conv_type(value.tpe());
             let id = env.local_id_by_name(&name);
 
-            let mut code = code_value(*value, env);
+            let (mut code, locals) = code_value(*value, env);
             code.push(Instr::SetLocal { id, tpe });
-            code
+            (code, locals)
         }
         Init { name, value, .. } => {
             let tpe = conv_type(value.tpe());
             let id = env.new_local(name.clone(), tpe.clone());
 
-            let mut code = code_value(*value, env);
+            let (mut code, mut locals) = code_value(*value, env);
             code.push(Instr::NewLocal { id, tpe });
-            code
+            locals.push(id);
+            (code, locals)
         }
-        Record { fields, tpe } => todo!(),
-        Call { func, args, tpe } => todo!(),
-        Builtin { op, args, tpe } => todo!(),
-        Access { object, field, tpe } => todo!(),
-        Lambda { args, ret, body, tpe } => todo!(),
-        If { cond, then, elsë, tpe } => todo!(),
-        While { cond, body, tpe } => todo!(),
-        For { key, value, expr, body, tpe } => todo!(),
+        Record { fields, tpe } => {
+            todo!()
+        }
+        Call { func, args, tpe } => {
+            todo!()
+        }
+        Builtin { op, args, tpe } => {
+            todo!()
+        }
+        Access { object, field, tpe } => {
+            todo!()
+        }
+        Lambda { args, ret, body, tpe } => {
+            todo!()
+        }
+        If { cond, then, elsë, tpe } => {
+            todo!()
+        }
+        While { cond, body, tpe } => {
+            todo!()
+        }
+        For { key, value, expr, body, tpe } => {
+            todo!()
+        }
     }
 }
 
 fn code_block(body: Vec<Value>, env: &mut Env) -> Vec<Instr> {
     let mut code = vec![];
+    let mut locals = vec![];
     for value in body {
-        code.extend(code_value(value, env));
+        let (new_code, new_locals) = code_value(value, env);
+        code.extend(new_code);
+        locals.extend(new_locals);
+    }
+    for local in locals {
+        code.push(Instr::DropLocal {
+            id: local,
+            tpe: env.local_type_by_id(local)
+        });
     }
     code
 }
