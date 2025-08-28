@@ -29,7 +29,7 @@ pub enum Expr {
     Call { line: i64, func: Box<Expr>, args: Vec<Expr> },
     BinOp { line: i64, name: String, lhs: Box<Expr>, rhs: Box<Expr> },
     Access { line: i64, object: Box<Expr>, field: String },
-    Lambda { line: i64, args: Vec<(String, Expr)>, return_type: Box<Expr>, body: Vec<Expr> },
+    Lambda { line: i64, args: Vec<(String, Expr)>, ret: Box<Expr>, body: Vec<Expr> },
     Assign { line: i64, name: String, expr: Box<Expr> },
     If { line: i64, cond: Box<Expr>, then: Vec<Expr>, elsë: Vec<Expr> },
     While { line: i64, cond: Box<Expr>, body: Vec<Expr> },
@@ -138,7 +138,7 @@ fn parse_fun(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
     let (i, args) = parse_arguments(tokens, i)?;
     let (i, ret) = parse_expr(tokens, i)?;
     let (i, body) = parse_block(tokens, i)?;
-    Ok((i, Expr::Lambda { line, args, return_type: Box::new(ret), body }))
+    Ok((i, Expr::Lambda { line, args, ret: Box::new(ret), body }))
 }
 
 fn parse_access(tokens: &[Token], i: usize, line: i64, object: Expr) -> Fallible<(usize, Expr)> {
@@ -604,7 +604,7 @@ mod parser_tests {
 
     #[test]
     fn test_lambda_parsing_structure() {
-        // We assert structural properties rather than exact equality of return_type field.
+        // We assert structural properties rather than exact equality of ret field.
         let src = r#" L = fun [x: int, y: real] int { x = x + 1 }; "#;
         let parsed = parse(src).expect("parse lambda");
         let lambda_expr = parsed.into_iter().find_map(|d| match d {
@@ -613,7 +613,7 @@ mod parser_tests {
         }).expect("const L not found");
 
         match lambda_expr.clone() {
-            Expr::Lambda { args, return_type: _rt, body, .. } => {
+            Expr::Lambda { args, ret: _rt, body, .. } => {
                 // args should include x and y with their types (we used 123 and 3.14 as dummy type expressions in source)
                 assert_eq!(args.len(), 2);
                 assert_eq!(args[0].0, "x");

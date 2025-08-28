@@ -23,7 +23,7 @@ pub enum Value {
     Call { line: i64, func: Box<Value>, args: Vec<Value> },
     BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
     Access { line: i64, object: Box<Value>, field: String },
-    Lambda { line: i64, args: Vec<(String, Value)>, return_type: Box<Value>, body: Vec<Value> },
+    Lambda { line: i64, args: Vec<(String, Value)>, ret: Box<Value>, body: Vec<Value> },
     Init { line: i64, name: String, value: Box<Value> },
     Assign { line: i64, name: String, value: Box<Value> },
     If { line: i64, cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value> },
@@ -215,7 +215,7 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
                 Ok((key, nameres_expr(value, ns_path, env)?))
             }).collect::<Fallible<HashMap<_, _>>>()?
         }),
-        Expr::Lambda { line, args, return_type, body } => {
+        Expr::Lambda { line, args, ret, body } => {
             let mut inner = LocalEnv::new_scope(env);
 
             let args = args.into_iter().map(|(name, tpe)| {
@@ -228,13 +228,13 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
                 Ok((name, nameres_expr(tpe, ns_path, &mut inner)?))
             }).collect::<Fallible<Vec<_>>>()?;
 
-            let return_type = nameres_expr(*return_type, ns_path, &mut inner)?;
+            let ret = nameres_expr(*ret, ns_path, &mut inner)?;
             let body = nameres_exprs(body, ns_path, inner)?;
 
             Ok(Value::Lambda {
                 line,
                 args,
-                return_type: Box::new(return_type),
+                ret: Box::new(ret),
                 body
             })
         }
@@ -247,7 +247,7 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
             } else if let Some((name, true)) = var {
                 Ok(Value::Assign { line, name, value: Box::new(value) })
             } else {
-                env.add_var(&name);
+                let name = env.add_var(&name).unwrap();
                 Ok(Value::Init { line, name, value: Box::new(value) })
             }
         }
@@ -619,7 +619,7 @@ mod nameres_tests {
         let main = vec![const_decl("main", Expr::Lambda {
             line: 1,
             args: vec![],
-            return_type: Box::new(int(0)),
+            ret: Box::new(int(0)),
             body
         }, false)];
 
@@ -698,7 +698,7 @@ mod nameres_tests {
                 const_decl("main", Expr::Lambda {
                     line: 1,
                     args: vec![],
-                    return_type: Box::new(var("Int")),
+                    ret: Box::new(var("Int")),
                     body: vec![
                         Expr::Assign {
                             line: 1,
@@ -727,7 +727,7 @@ mod nameres_tests {
                     ("x".to_string(), var("Int")),
                     ("x".to_string(), var("Text"))
                 ],
-                return_type: Box::new(var("Int")),
+                ret: Box::new(var("Int")),
                 body: vec![]
             }, false)
         ])]);

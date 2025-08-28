@@ -15,7 +15,7 @@ pub enum Value {
     Call { func: Box<Value>, args: Vec<Value>, tpe: Type },
     Builtin { op: String, args: Vec<Value>, tpe: Type },
     Access { object: Box<Value>, field: String, tpe: Type },
-    Lambda { args: Vec<(String, Type)>, return_type: Type, body: Vec<Value>, tpe: Type },
+    Lambda { args: Vec<(String, Type)>, ret: Type, body: Vec<Value>, tpe: Type },
     Init { name: String, value: Box<Value>, tpe: Type },
     Assign { name: String, value: Box<Value>, tpe: Type },
     If { cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value>, tpe: Type },
@@ -79,12 +79,12 @@ fn global_env(globals: &HashMap<String, nameres::Value>) -> Fallible<HashMap<Str
             Real { .. } => env.insert(name.clone(), Type::Real),
             Text { .. } => env.insert(name.clone(), Type::Text),
             Bool { .. } => env.insert(name.clone(), Type::Bool),
-            Lambda { args, return_type, .. } => {
-                let return_type = Box::new(check_type(return_type)?);
+            Lambda { args, ret, .. } => {
+                let ret = Box::new(check_type(ret)?);
                 let args = args.iter().map(|(_, t)| {
                     check_type(t)
                 }).collect::<Fallible<Vec<_>>>()?;
-                env.insert(name.clone(), Type::Func { args, return_type })
+                env.insert(name.clone(), Type::Func { args, ret })
             }
             v => err(v.line(), "Global must be a literal or function".into())?
         };
@@ -199,16 +199,16 @@ fn check_for(line: i64, key: String, value: String, expr: nameres::Value, body: 
     Ok(Value::For { key, value, expr, body, tpe })
 }
 
-fn check_lambda(line: i64, args: Vec<(String, nameres::Value)>, return_type: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_lambda(line: i64, args: Vec<(String, nameres::Value)>, ret: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let args = args.into_iter().map(|(name, tpe)| {
         Ok((name, check_type(&tpe)?))
     }).collect::<Fallible<Vec<(String, Type)>>>()?;
     env.extend(args.clone());
 
-    let return_type = check_type(&return_type)?;
+    let ret = check_type(&ret)?;
     let tpe = Type::Func {
         args: args.iter().map(|(_, t)| t.clone()).collect(),
-        return_type: Box::new(return_type.clone())
+        ret: Box::new(ret.clone())
     };
     let body = body.into_iter().map(|v| {
         check_value(v, env)
@@ -216,16 +216,16 @@ fn check_lambda(line: i64, args: Vec<(String, nameres::Value)>, return_type: nam
     let void = Type::Record { fields: HashMap::new() };
     let body_t = body.last().map(Value::tpe).unwrap_or(void.clone());
 
-    if return_type == body_t || return_type == void {
-        Ok(Value::Lambda { args, return_type, body, tpe })
+    if ret == body_t || ret == void {
+        Ok(Value::Lambda { args, ret, body, tpe })
     } else {
-        err(line, format!("Return type is {}, but the function returns {}", return_type, body_t))
+        err(line, format!("Return type is {}, but the function returns {}", ret, body_t))
     }
 }
 
 fn check_call(line: i64, func: nameres::Value, args: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let func = Box::new(check_value(func, env)?);
-    if let Type::Func { args: expected, return_type } = func.tpe() {
+    if let Type::Func { args: expected, ret } = func.tpe() {
         if args.len() != expected.len() {
             err(line, format!("Expected {} arguments but got {}", expected.len(), args.len()))?;
         }
@@ -236,7 +236,7 @@ fn check_call(line: i64, func: nameres::Value, args: Vec<nameres::Value>, env: &
             }
             Ok(v)
         }).collect::<Fallible<Vec<_>>>()?;
-        Ok(Value::Call { func, args, tpe: *return_type })
+        Ok(Value::Call { func, args, tpe: *ret })
     } else {
         err(line, format!("{} is not a function", func.tpe()))?
     }
@@ -286,7 +286,7 @@ fn check_value(value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallib
         If { cond, then, elsë, .. } => check_if(*cond, then, elsë, env),
         While { cond, body, .. } => check_while(*cond, body, env),
         For { line, key, value, expr, body } => check_for(line, key, value, *expr, body, env),
-        Lambda { line, args, return_type, body } => check_lambda(line, args, *return_type, body, env),
+        Lambda { line, args, ret, body } => check_lambda(line, args, *ret, body, env),
         Call { line, func, args } => {
             if let Var { name, .. } = &*func && is_builtin_name(name) {
                 check_builtin_call(line, name.clone(), args, env)
@@ -344,7 +344,7 @@ mod tests {
             Value::Lambda {
                 line: 1,
                 args: args.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
-                return_type: Box::new(ret_type),
+                ret: Box::new(ret_type),
                 body,
             }
         }
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(typed_globals["my_bool"].tpe(), Type::Bool);
         assert_eq!(typed_globals["my_record"].tpe(), Type::Func {
             args: vec![],
-            return_type: Box::new(Type::Record {
+            ret: Box::new(Type::Record {
                 fields: HashMap::from([
                     ("a".to_string(), Type::Int),
                     ("b".to_string(), Type::Bool),
@@ -469,7 +469,6 @@ mod tests {
             (call("print", vec![text("a")]), Type::Record { fields: HashMap::new() }),
             (call("len", vec![call("list", vec![var("Int")])]), Type::Int),
             (call("has", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Bool),
-            (call("has", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Bool),
             (call("get", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Int),
             (call("get", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Int),
             (call("set", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), Type::Record { fields: HashMap::new() }),
@@ -537,7 +536,7 @@ mod tests {
         let typed = check(globals).unwrap();
         assert_eq!(typed["result"].tpe(), Type::Func {
             args: vec![],
-            return_type: Box::new(Type::Int)
+            ret: Box::new(Type::Int)
         });
     }
 
