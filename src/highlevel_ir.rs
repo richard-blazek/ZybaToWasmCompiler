@@ -192,82 +192,80 @@ fn conv_type(t: builtin::Type) -> Type {
 }
 
 struct Env {
-    local_map: HashMap<String, i64>,
-    local_types: HashMap<i64, Type>,
-    local_count: i64,
+    local_name_to_id: HashMap<String, i64>,
+    local_id_to_type: HashMap<i64, Type>,
+    local_counter: i64,
 
-    global_fetch: HashMap<String, Instr>,
-    global_fn_map: HashMap<String, i64>,
-    global_fn_count: i64,
-    lambda_fn_count: i64,
     funcs: Vec<Func>,
+    global_fetch: HashMap<String, Instr>,
+    global_name_to_id: HashMap<String, i64>,
+    global_counter: i64,
 }
 
 impl Env {
     fn new(values: &HashMap<String, Value>) -> Env {
         use Instr::*;
 
-        let mut map = HashMap::new();
-        let mut fn_map = HashMap::new();
-        let mut fn_count = 0;
+        let mut instr_map = HashMap::new();
+        let mut id_map = HashMap::new();
+        let mut counter = 0;
 
         for (name, value) in values {
             let name = name.clone();
             match value {
                 Value::Int { value, .. } => {
-                    map.insert(name, PushInt { value: *value });
+                    instr_map.insert(name, PushInt { value: *value });
                 }
                 Value::Real { value, .. } => {
-                    map.insert(name, PushReal { value: *value });
+                    instr_map.insert(name, PushReal { value: *value });
                 }
                 Value::Text { value, .. } => {
-                    map.insert(name, PushText { value: value.clone() });
+                    instr_map.insert(name, PushText { value: value.clone() });
                 }
                 Value::Bool { value, .. } => {
-                    map.insert(name, PushBool { value: *value });
+                    instr_map.insert(name, PushBool { value: *value });
                 }
                 Value::Lambda { args, ret, .. } => {
-                    map.insert(name.clone(), BindFunc {
-                        id: fn_count,
+                    instr_map.insert(name.clone(), BindFunc {
+                        id: counter,
                         args: args.iter().map(|(_, t)| conv_type(t.clone())).collect(),
                         ret: conv_type(ret.clone()),
                         capture: vec![]
                     });
-                    fn_map.insert(name, fn_count);
-                    fn_count += 1;
+                    id_map.insert(name, counter);
+                    counter += 1;
                 }
                 _ => unreachable!(),
             }
         }
 
         let mut funcs = vec![];
-        funcs.resize(fn_count as usize, Func { code: vec![] });
+        funcs.resize(counter as usize, Func { code: vec![] });
 
         Env {
-            local_map: HashMap::new(),
-            local_types: HashMap::new(),
-            local_count: 0,
-            global_fetch: map,
+            local_name_to_id: HashMap::new(),
+            local_id_to_type: HashMap::new(),
+            local_counter: 0,
+            global_fetch: instr_map,
             funcs,
-            global_fn_map: fn_map,
-            global_fn_count: fn_count,
-            lambda_fn_count: 0
+            global_name_to_id: id_map,
+            global_counter: counter,
         }
     }
 
     fn new_local(&mut self, name: String, tpe: Type) -> i64 {
-        self.local_types.insert(self.local_count, tpe);
-        self.local_map.insert(name, self.local_count);
-        self.local_count += 1;
-        self.local_count - 1
+        self.local_id_to_type.insert(self.local_counter, tpe);
+        self.local_name_to_id.insert(name, self.local_counter);
+        self.local_counter += 1;
+        self.local_counter - 1
     }
 
     fn local_type_by_id(&self, id: i64) -> Type {
-        self.local_types[&id].clone()
+        self.local_id_to_type[&id].clone()
     }
 
     fn local_id_by_name(&self, name: &str) -> i64 {
-        self.local_map[name]
+        self.local_name_to_id[name]
     }
 
     fn local_type_by_name(&self, name: &str) -> Type {
@@ -275,7 +273,7 @@ impl Env {
     }
 
     fn is_local(&self, name: &str) -> bool {
-        self.local_map.contains_key(name)
+        self.local_name_to_id.contains_key(name)
     }
 
     fn is_global(&self, name: &str) -> bool {
@@ -287,7 +285,7 @@ impl Env {
     }
 
     fn global_id_by_name(&self, name: &str) -> i64 {
-        self.global_fn_map[name]
+        self.global_name_to_id[name]
     }
 
     fn set_global(&mut self, name: &str, func: Func) {
@@ -296,15 +294,62 @@ impl Env {
     }
 
     fn add_lambda(&mut self, func: Func) -> i64 {
-        let i = self.lambda_fn_count + self.global_fn_count;
-        self.lambda_fn_count += 1;
-        self.funcs[i as usize] = func;
-        i
+        self.funcs[self.global_counter as usize - 1] = func;
+        self.global_counter += 1;
+        self.global_counter - 1
     }
 }
 
 fn code_value(value: Value, env: &mut Env) -> Vec<Instr> {
-    todo!()
+    use Value::*;
+
+    match value {
+        Int { value, .. } => vec![Instr::PushInt { value }],
+        Real { value, .. } => vec![Instr::PushReal { value }],
+        Text { value, .. } => vec![Instr::PushText { value }],
+        Bool { value, .. } => vec![Instr::PushBool { value }],
+        Var { name, tpe } => vec![
+            if env.is_global(&name) {
+                env.fetch_global(&name)
+            } else {
+                let tpe = conv_type(tpe);
+                let id = env.local_id_by_name(&name);
+                Instr::GetLocal { id, tpe }
+            }
+        ],
+        Assign { name, value, .. } => {
+            let tpe = conv_type(value.tpe());
+            let id = env.local_id_by_name(&name);
+
+            let mut code = code_value(*value, env);
+            code.push(Instr::SetLocal { id, tpe });
+            code
+        }
+        Init { name, value, .. } => {
+            let tpe = conv_type(value.tpe());
+            let id = env.new_local(name.clone(), tpe.clone());
+
+            let mut code = code_value(*value, env);
+            code.push(Instr::NewLocal { id, tpe });
+            code
+        }
+        Record { fields, tpe } => todo!(),
+        Call { func, args, tpe } => todo!(),
+        Builtin { op, args, tpe } => todo!(),
+        Access { object, field, tpe } => todo!(),
+        Lambda { args, ret, body, tpe } => todo!(),
+        If { cond, then, elsë, tpe } => todo!(),
+        While { cond, body, tpe } => todo!(),
+        For { key, value, expr, body, tpe } => todo!(),
+    }
+}
+
+fn code_block(body: Vec<Value>, env: &mut Env) -> Vec<Instr> {
+    let mut code = vec![];
+    for value in body {
+        code.extend(code_value(value, env));
+    }
+    code
 }
 
 pub fn codegen(main_name: &str, globals: HashMap<String, Value>) -> Program {
@@ -314,14 +359,12 @@ pub fn codegen(main_name: &str, globals: HashMap<String, Value>) -> Program {
         match value {
             Value::Lambda { args, body, .. } => {
                 let mut code = vec![];
-                for (n, t) in args {
-                    let tpe = conv_type(t);
-                    let id = env.new_local(n.clone(), tpe.clone());
+                for (arg_name, arg_tpe) in args {
+                    let tpe = conv_type(arg_tpe);
+                    let id = env.new_local(arg_name, tpe.clone());
                     code.push(Instr::NewLocal { id, tpe });
                 }
-                for value in body {
-                    code.extend(code_value(value, &mut env));
-                }
+                code.extend(code_block(body, &mut env));
                 env.set_global(&name, Func { code });
             }
             _ => unreachable!()
