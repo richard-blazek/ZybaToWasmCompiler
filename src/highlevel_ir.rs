@@ -53,7 +53,7 @@ pub enum Instr {
     // stack before: [any, value of type=tpe]
     // stack after: [any]
     // new local with id=id and the given value created
-    NewLocal { id: i64, tpe: Type },
+    InitLocal { id: i64, tpe: Type },
 
     // the local with type=tpe, id=id dropped
     DropLocal { id: i64, tpe: Type },
@@ -158,6 +158,13 @@ pub struct Program {
     entry: i64
 }
 
+
+fn sorted<A, T: IntoIterator<Item=A>, K: Ord, F: Fn(&A) -> &K>(items: T, key: F) -> Vec<A> {
+    let mut v = Vec::from_iter(items);
+    v.sort_by(|a, b| K::cmp(key(a), key(b)));
+    v
+}
+
 fn conv_type(t: builtin::Type) -> Type {
     use builtin::Type::*;
 
@@ -183,8 +190,7 @@ fn conv_type(t: builtin::Type) -> Type {
             Box::new(conv_type(*ret))
         ),
         Record { fields } => {
-            let mut vec: Vec<_> = fields.into_iter().collect();
-            vec.sort_by(|(n1, _), (n2, _)| String::cmp(n1, n2));
+            let vec: Vec<_> = sorted(fields, |(n, _)| n);
 
             Type::Tuple(vec.into_iter().map(|(_, t)| conv_type(t)).collect())
         }
@@ -330,18 +336,30 @@ fn code_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
             let id = env.new_local(name.clone(), tpe.clone());
 
             let (mut code, mut locals) = code_value(*value, env);
-            code.push(Instr::NewLocal { id, tpe });
+            code.push(Instr::InitLocal { id, tpe });
             locals.push(id);
             (code, locals)
         }
-        Record { fields, tpe } => {
-            todo!()
+        Record { fields, .. } => {
+            let fields = sorted(fields, |(n, _)| n);
+            let values: Vec<_> = fields.into_iter().map(|(_, v)| v).collect();
+            let types = values.iter().map(|v| conv_type(v.tpe())).collect();
+
+            let (mut code, locals) = code_values(values, env);
+            code.push(Instr::NewTuple { fields: types });
+            (code, locals)
         }
         Call { func, args, tpe } => {
-            todo!()
-        }
-        Builtin { op, args, tpe } => {
-            todo!()
+            let arg_types = args.iter().map(|a| conv_type(a.tpe())).collect();
+            let ret_type = conv_type(tpe);
+
+            let (mut code, mut locals) = code_values(args, env);
+            let (func_code, func_locals) = code_value(*func, env);
+            code.extend(func_code);
+            locals.extend(func_locals);
+
+            code.push(Instr::CallFunc { args: arg_types, ret: ret_type });
+            (code, locals)
         }
         Access { object, field, tpe } => {
             todo!()
@@ -358,17 +376,25 @@ fn code_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
         For { key, value, expr, body, tpe } => {
             todo!()
         }
+        Builtin { op, args, tpe } => {
+            todo!()
+        }
     }
 }
 
-fn code_block(body: Vec<Value>, env: &mut Env) -> Vec<Instr> {
+fn code_values(vals: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     let mut code = vec![];
     let mut locals = vec![];
-    for value in body {
-        let (new_code, new_locals) = code_value(value, env);
+    for val in vals {
+        let (new_code, new_locals) = code_value(val, env);
         code.extend(new_code);
         locals.extend(new_locals);
     }
+    (code, locals)
+}
+
+fn code_block(body: Vec<Value>, env: &mut Env) -> Vec<Instr> {
+    let (mut code, locals) = code_values(body, env);
     for local in locals {
         code.push(Instr::DropLocal {
             id: local,
@@ -388,7 +414,7 @@ pub fn codegen(main_name: &str, globals: HashMap<String, Value>) -> Program {
                 for (arg_name, arg_tpe) in args {
                     let tpe = conv_type(arg_tpe);
                     let id = env.new_local(arg_name, tpe.clone());
-                    code.push(Instr::NewLocal { id, tpe });
+                    code.push(Instr::InitLocal { id, tpe });
                 }
                 code.extend(code_block(body, &mut env));
                 env.set_global(&name, Func { code });
