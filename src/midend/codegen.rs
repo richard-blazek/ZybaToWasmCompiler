@@ -141,7 +141,7 @@ fn gen_assign(name: String, value: Value, g: &mut Globals, l: &mut Locals) -> Ve
 }
 
 fn gen_init(name: String, value: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    l.add(name.clone(), Type::from(&value.tpe()));
+    l.define(name.clone(), Type::from(&value.tpe()));
     gen_assign(name, value, g, l)
 }
 
@@ -221,7 +221,7 @@ fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<I
     code.push(Instr::JumpUnless { id: leave });
     code.extend(gen_value(body, g, l));
     code.push(Instr::Drop { tpe: Type::from(&body_t) });
-    code.push(Instr::JumpAlways { id: start });;
+    code.push(Instr::JumpAlways { id: start });
     code.push(Instr::Label { id: leave });
     code.push(Instr::NewTuple { fields: vec![] });
     code
@@ -238,7 +238,7 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Valu
     let mut capture_types = vec![];
     for capture in captures {
         let tpe = l.get_type(&capture);
-        let id = inner.add(capture, tpe.clone());
+        let id = inner.define(capture, tpe.clone());
 
         capture_types.push(tpe.clone());
         code.push(Instr::SetLocal { id, tpe });
@@ -247,7 +247,7 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Valu
     let mut arg_types = vec![];
     for (arg, tpe) in args {
         let tpe = Type::from(&tpe);
-        let id = inner.add(arg, tpe.clone());
+        let id = inner.define(arg, tpe.clone());
 
         arg_types.push(tpe.clone());
         code.push(Instr::SetLocal { id, tpe })
@@ -322,7 +322,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
 
                 for (arg_name, arg_tpe) in args {
                     let tpe = Type::from(&arg_tpe);
-                    let id = l.add(arg_name, tpe.clone());
+                    let id = l.define(arg_name, tpe.clone());
                     code.push(Instr::SetLocal { id, tpe });
                 }
                 code.extend(gen_value(*body, &mut g, &mut l));

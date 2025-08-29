@@ -12,14 +12,14 @@ impl Locals {
         Locals { ids: HashMap::new(), types: vec![] }
     }
 
-    pub fn add(&mut self, name: String, tpe: Type) -> usize {
+    pub fn alloc(&mut self, tpe: Type) -> usize {
         self.types.push(tpe);
-        self.ids.insert(name, self.types.len() - 1);
         self.types.len() - 1
     }
 
-    pub fn contains(&self, name: &str) -> bool {
-        self.ids.contains_key(name)
+    pub fn define(&mut self, name: String, tpe: Type) -> usize {
+        self.ids.insert(name, self.types.len());
+        self.alloc(tpe)
     }
 
     pub fn get_id(&self, name: &str) -> usize {
