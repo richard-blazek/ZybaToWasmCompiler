@@ -105,7 +105,7 @@ pub fn is_builtin_name(name: &str) -> bool {
     BUILTIN_NAMES.contains(name)
 }
 
-fn void() -> Type {
+pub fn void() -> Type {
     Type::Record { fields: HashMap::new() }
 }
 

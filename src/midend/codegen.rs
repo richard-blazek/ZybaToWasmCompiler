@@ -6,6 +6,105 @@ use crate::typecheck::Value;
 use crate::midend::ir::*;
 use crate::midend::utils::*;
 
+fn collect_vars(v: &Value) -> (HashSet<String>, HashSet<String>) {
+    match v {
+        Value::Record { fields, .. } => {
+            let mut used = HashSet::new();
+            let mut defined = HashSet::new();
+            for (_, value) in fields {
+                let (new_used, new_defined) = collect_vars(value);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            (used, defined)
+        }
+        Value::Var { name, .. } => {
+            (HashSet::from_iter([name.clone()]), HashSet::new())
+        }
+        Value::Call { func, args, .. } => {
+            let (mut used, mut defined) = collect_vars(func);
+            for arg in args {
+                let (new_used, new_defined) = collect_vars(arg);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            (used, defined)
+        }
+        Value::Builtin { args, .. } => {
+            let mut used = HashSet::new();
+            let mut defined = HashSet::new();
+            for arg in args {
+                let (new_used, new_defined) = collect_vars(arg);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            (used, defined)
+        }
+        Value::Access { object, .. } => {
+            collect_vars(&**object)
+        }
+        Value::Lambda { args, body, .. } => {
+            let (used, mut defined) = collect_vars(body);
+            defined.extend(args.iter().map(|(n, _)| n.clone()));
+            (used, defined)
+        }
+        Value::Init { name, value, .. } => {
+            let (used, mut defined) = collect_vars(value);
+            defined.insert(name.clone());
+            (used, defined)
+        }
+        Value::Assign { value, .. } => {
+            collect_vars(value)
+        }
+        Value::If { cond, then, elsë, .. } => {
+            let (mut used, mut defined) = collect_vars(cond);
+            let (then_used, then_defined) = collect_vars(then);
+            let (else_used, else_defined) = collect_vars(elsë);
+            used.extend(then_used);
+            used.extend(else_used);
+            defined.extend(then_defined);
+            defined.extend(else_defined);
+            (used, defined)
+        }
+        Value::While { cond, body, .. } => {
+            let (mut used, mut defined) = collect_vars(cond);
+            let (new_used, new_defined) = collect_vars(body);
+            used.extend(new_used);
+            defined.extend(new_defined);
+            (used, defined)
+        }
+        Value::For { key, value, expr, body, .. } => {
+            let (mut used, mut defined) = collect_vars(expr);
+            let (new_used, new_defined) = collect_vars(body);
+            used.extend(new_used);
+            defined.extend(new_defined);
+            defined.extend([key.clone(), value.clone()]);
+            (used, defined)
+        }
+        Value::Block { values, .. } => {
+            let mut used = HashSet::new();
+            let mut defined = HashSet::new();
+            for value in values {
+                let (new_used, new_defined) = collect_vars(value);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            (used, defined)
+        }
+        _ => {
+            (HashSet::new(), HashSet::new())
+        }
+    }
+}
+
+fn collect_captures(body: &Value, args: HashSet<String>, g: &mut Globals) -> Vec<String> {
+    let (mut used, defined) = collect_vars(body);
+    used.retain(|x| {
+        !defined.contains(x) && !args.contains(x) && !g.contains(x)
+    });
+    Vec::from_iter(used)
+}
+
 fn gen_int(value: i64) -> Vec<Instr> {
     vec![Instr::PushInt { value }]
 }
@@ -50,16 +149,18 @@ fn gen_record(fields: Vec<(String, Value)>, g: &mut Globals, l: &mut Locals) -> 
     let values: Vec<_> = fields.into_iter().map(|(_, v)| v).collect();
     let types = values.iter().map(|v| Type::from(&v.tpe())).collect();
 
-    let mut code = gen_values(values, g, l);
-    code.push(Instr::NewTuple { fields: types });
-    code
+    values.into_iter().flat_map(|v| {
+        gen_value(v, g, l)
+    }).chain([Instr::NewTuple { fields: types }]).collect()
 }
 
 fn gen_call(func: Value, args: Vec<Value>, ret: builtin::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let args_t = args.iter().map(|a| Type::from(&a.tpe())).collect();
     let ret = Type::from(&ret);
 
-    let mut code = gen_values(args, g, l);
+    let mut code: Vec<_> = args.into_iter().flat_map(|v| {
+        gen_value(v, g, l)
+    }).collect();
     code.extend(gen_value(func, g, l));
     code.push(Instr::CallFunc { args: args_t, ret });
     code
@@ -79,22 +180,22 @@ fn gen_access(object: Value, field: String, g: &mut Globals, l: &mut Locals) -> 
     code
 }
 
-fn gen_if(cond: Value, then: Vec<Value>, elsë: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_if(cond: Value, then: Value, elsë: Value, tpe: builtin::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let if_not = g.new_label();
     let end_if = g.new_label();
 
     let mut code = gen_value(cond, g, l);
     code.push(Instr::JumpUnless { id: if_not });
-    code.extend(gen_values(then, g, l));
+    code.extend(gen_value(then, g, l));
     code.push(Instr::JumpAlways { id: end_if });
     code.push(Instr::Label { id: if_not });
-    code.extend(gen_values(elsë, g, l));
+    code.extend(gen_value(elsë, g, l));
     code.push(Instr::Label { id: end_if });
 
     code
 }
 
-fn gen_while(cond: Value, body: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let leave = g.new_label();
     let start = g.new_label();
 
@@ -102,101 +203,14 @@ fn gen_while(cond: Value, body: Vec<Value>, g: &mut Globals, l: &mut Locals) -> 
     code.extend(gen_value(cond, g, l));
 
     code.push(Instr::JumpUnless { id: leave });
-    code.extend(gen_values(body, g, l));
+    code.extend(gen_value(body, g, l));
     code.push(Instr::JumpAlways { id: start });;
     code.push(Instr::Label { id: leave });
 
     code
 }
 
-fn collect_vars<'a, T: IntoIterator<Item=&'a Value>>(body: T) -> (HashSet<String>, HashSet<String>) {
-    let mut used = HashSet::new();
-    let mut defined = HashSet::new();
-    for value in body {
-        match value {
-            Value::Record { fields, .. } => {
-                let (new_used, new_defined) = collect_vars(fields.values());
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::Var { name, .. } => {
-                used.insert(name.clone());
-            }
-            Value::Call { func, args, .. } => {
-                let (new_used, new_defined) = collect_vars(
-                    args.iter().chain([&**func])
-                );
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::Builtin { args, .. } => {
-                let (new_used, new_defined) = collect_vars(args);
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::Access { object, .. } => {
-                let (new_used, new_defined) = collect_vars([&**object]);
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::Lambda { args, body, .. } => {
-                defined.extend(args.iter().map(|(n, _)| n.clone()));
-
-                let (new_used, new_defined) = collect_vars(body);
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::Init { name, value, .. } => {
-                defined.insert(name.clone());
-
-                let (new_used, new_defined) = collect_vars([&**value]);
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::Assign { value, .. } => {
-                let (new_used, new_defined) = collect_vars([&**value]);
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::If { cond, then, elsë, .. } => {
-                let (new_used, new_defined) = collect_vars(
-                    then.iter().chain(elsë).chain([&**cond])
-                );
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::While { cond, body, .. } => {
-                let (new_used, new_defined) = collect_vars(
-                    body.iter().chain([&**cond])
-                );
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            Value::For { key, value, expr, body, .. } => {
-                defined.insert(key.clone());
-                defined.insert(value.clone());
-
-                let (new_used, new_defined) = collect_vars(
-                    body.iter().chain([&**expr])
-                );
-                used.extend(new_used);
-                defined.extend(new_defined);
-            }
-            _ => {}
-        }
-    }
-    (used, defined)
-}
-
-fn collect_captures(body: &Vec<Value>, args: HashSet<String>, g: &mut Globals) -> Vec<String> {
-    let (mut used, defined) = collect_vars(body);
-    used.retain(|x| {
-        !defined.contains(x) && !args.contains(x) && !g.contains(x)
-    });
-    Vec::from_iter(used)
-}
-
-fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let captures = collect_captures(&body, args.iter().map(|(n, _)| {
         n.clone()
     }).collect(), g);
@@ -222,7 +236,7 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Vec<
         code.push(Instr::SetLocal { id, tpe })
     }
 
-    code.extend(gen_values(body, g, &mut inner));
+    code.extend(gen_value(body, g, &mut inner));
 
     vec![Instr::BindFunc {
         id: g.add_lambda(Func::new(code, inner.get_all())),
@@ -232,12 +246,23 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Vec<
     }]
 }
 
-fn gen_for(key: String, value: String, expr: Value, body: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     todo!()
 }
 
 fn gen_builtin(op: String, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     todo!()
+}
+
+fn gen_block(vals: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    let mut code = vec![];
+    for val in vals {
+        let tpe = val.tpe();
+        code.extend(gen_value(val, g, l));
+        code.push(Instr::Drop { tpe: Type::from(&tpe) });
+    }
+    code.pop();
+    code
 }
 
 fn gen_value(value: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
@@ -254,23 +279,13 @@ fn gen_value(value: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
         Record { fields, .. } => gen_record(sorted(fields, |(n, _)| n), g, l),
         Call { func, args, tpe } => gen_call(*func, args, tpe, g, l),
         Access { object, field, .. } => gen_access(*object, field, g, l),
-        If { cond, then, elsë, .. } => gen_if(*cond, then, elsë, g, l),
-        While { cond, body, .. } => gen_while(*cond, body, g, l),
-        Lambda { args, ret, body, .. } => gen_lambda(args, ret, body, g, l),
-        For { key, value, expr, body, .. } => gen_for(key, value, *expr, body, g, l),
-        Builtin { op, args, .. } => gen_builtin(op, args, g, l)
+        If { cond, then, elsë, tpe } => gen_if(*cond, *then, *elsë, tpe, g, l),
+        While { cond, body, .. } => gen_while(*cond, *body, g, l),
+        Lambda { args, ret, body, .. } => gen_lambda(args, ret, *body, g, l),
+        For { key, value, expr, body, .. } => gen_for(key, value, *expr, *body, g, l),
+        Builtin { op, args, .. } => gen_builtin(op, args, g, l),
+        Block { values, .. } => gen_block(values, g, l)
     }
-}
-
-fn gen_values(vals: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let mut code = vec![];
-    for val in vals {
-        let tpe = val.tpe();
-        code.extend(gen_value(val, g, l));
-        code.push(Instr::Drop { tpe: Type::from(&tpe) });
-    }
-    code.pop();
-    code
 }
 
 pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
@@ -287,7 +302,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
                     let id = l.add(arg_name, tpe.clone());
                     code.push(Instr::SetLocal { id, tpe });
                 }
-                code.extend(gen_values(body, &mut g, &mut l));
+                code.extend(gen_value(*body, &mut g, &mut l));
 
                 let func = Func::new(code, l.get_all());
                 g.set_func(g.func_id(&name), func);

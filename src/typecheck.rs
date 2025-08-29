@@ -15,12 +15,13 @@ pub enum Value {
     Call { func: Box<Value>, args: Vec<Value>, tpe: Type },
     Builtin { op: String, args: Vec<Value>, tpe: Type },
     Access { object: Box<Value>, field: String, tpe: Type },
-    Lambda { args: Vec<(String, Type)>, ret: Type, body: Vec<Value>, tpe: Type },
+    Lambda { args: Vec<(String, Type)>, ret: Type, body: Box<Value>, tpe: Type },
     Init { name: String, value: Box<Value>, tpe: Type },
     Assign { name: String, value: Box<Value>, tpe: Type },
-    If { cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value>, tpe: Type },
-    While { cond: Box<Value>, body: Vec<Value>, tpe: Type },
-    For { key: String, value: String, expr: Box<Value>, body: Vec<Value>, tpe: Type },
+    If { cond: Box<Value>, then: Box<Value>, elsë: Box<Value>, tpe: Type },
+    While { cond: Box<Value>, body: Box<Value>, tpe: Type },
+    For { key: String, value: String, expr: Box<Value>, body: Box<Value>, tpe: Type },
+    Block { values: Vec<Value>, tpe: Type }
 }
 
 impl Value {
@@ -31,7 +32,8 @@ impl Value {
             | Bool { tpe, .. } | Record { tpe, .. } | Var { tpe, .. }
             | Call { tpe, .. } | Builtin { tpe, .. } | Access { tpe, .. }
             | Lambda { tpe, .. } | Init { tpe, .. } | Assign { tpe, .. }
-            | If { tpe, .. } | While { tpe, .. } | For { tpe, .. } => tpe.clone()
+            | If { tpe, .. } | While { tpe, .. } | For { tpe, .. }
+            | Block { tpe, .. } => tpe.clone()
         }
     }
 }
@@ -151,31 +153,35 @@ fn check_access(line: i64, object: Expr, field: String, env: &mut HashMap<String
     }
 }
 
+fn check_block(block: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+    let mut values = block.into_iter().map(|v| {
+        check_value(v, env)
+    }).collect::<Fallible<Vec<_>>>()?;
+
+    if values.is_empty() {
+        values.push(Value::Record { fields: HashMap::new(), tpe: void() });
+    }
+
+    let tpe = values.last().unwrap().tpe();
+    Ok(Value::Block { values, tpe })
+}
+
 fn check_if(cond: Expr, then: Vec<Expr>, elsë: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
-    let then = then.into_iter().map(|v| {
-        check_value(v, env)
-    }).collect::<Fallible<Vec<_>>>()?;
-    let elsë = elsë.into_iter().map(|v| {
-        check_value(v, env)
-    }).collect::<Fallible<Vec<_>>>()?;
-    let then_t = then.last().map(Value::tpe);
-    let elsë_t = elsë.last().map(Value::tpe);
-    let tpe = if then_t.is_some() && then_t == elsë_t {
-        then_t.unwrap()
+    let then = Box::new(check_block(then, env)?);
+    let elsë = Box::new(check_block(elsë, env)?);
+    let tpe = if then.tpe() == elsë.tpe() {
+        then.tpe()
     } else {
-        Type::Record { fields: HashMap::new() }
+        void()
     };
     Ok(Value::If { cond, then, elsë, tpe })
 }
 
 fn check_while(cond: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
-    let body = body.into_iter().map(|v| {
-        check_value(v, env)
-    }).collect::<Fallible<Vec<_>>>()?;
-    let tpe = Type::Record { fields: HashMap::new() };
-    Ok(Value::While { cond, body, tpe })
+    let body = Box::new(check_block(body, env)?);
+    Ok(Value::While { cond, body, tpe: void() })
 }
 
 fn check_for(line: i64, key: String, value: String, expr: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -189,11 +195,8 @@ fn check_for(line: i64, key: String, value: String, expr: Expr, body: Vec<Expr>,
     } else {
         err(line, "Expected a List or Dict in the for loop".into())?;
     }
-    let body = body.into_iter().map(|v| {
-        check_value(v, env)
-    }).collect::<Fallible<Vec<_>>>()?;
-    let tpe = Type::Record { fields: HashMap::new() };
-    Ok(Value::For { key, value, expr, body, tpe })
+    let body = Box::new(check_block(body, env)?);
+    Ok(Value::For { key, value, expr, body, tpe: void() })
 }
 
 fn check_lambda(line: i64, args: Vec<(String, Expr)>, ret: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -207,16 +210,12 @@ fn check_lambda(line: i64, args: Vec<(String, Expr)>, ret: Expr, body: Vec<Expr>
         args: args.iter().map(|(_, t)| t.clone()).collect(),
         ret: Box::new(ret.clone())
     };
-    let body = body.into_iter().map(|v| {
-        check_value(v, env)
-    }).collect::<Fallible<Vec<_>>>()?;
-    let void = Type::Record { fields: HashMap::new() };
-    let body_t = body.last().map(Value::tpe).unwrap_or(void.clone());
 
-    if ret == body_t || ret == void {
+    let body = Box::new(check_block(body, env)?);
+    if ret == body.tpe() || ret == void() {
         Ok(Value::Lambda { args, ret, body, tpe })
     } else {
-        err(line, format!("Return type is {}, but the function returns {}", ret, body_t))
+        err(line, format!("Return type is {}, but the function returns {}", ret, body.tpe()))
     }
 }
 
@@ -376,11 +375,18 @@ mod tests {
 
     use helpers::*;
 
-    pub fn unwrap_lambda(value: &Value) -> Value {
+    fn lambda_body(value: &Value) -> &Vec<Value> {
         match value {
-            Value::Lambda { body, .. } => body[0].clone(),
+            Value::Lambda { body, .. } => match &**body {
+                Value::Block { values, .. } => values,
+                _ => panic!("it should be block")
+            },
             _ => panic!("it should be lambda")
         }
+    }
+
+    pub fn unwrap_lambda(value: &Value) -> Value {
+        lambda_body(value)[0].clone()
     }
 
     #[test]
@@ -423,16 +429,15 @@ mod tests {
             ])),
         ]);
         let typed_globals = check(globals).unwrap();
-        if let Value::Lambda { body, .. } = &typed_globals["main"] {
-            assert!(matches!(body[0], Value::Init { .. }));
-            assert_eq!(body[0].tpe(), Type::Int);
-            assert!(matches!(body[1], Value::Assign { .. }));
-            assert_eq!(body[1].tpe(), Type::Int);
-            assert!(matches!(body[2], Value::Var { .. }));
-            assert_eq!(body[2].tpe(), Type::Int);
-        } else {
-            panic!("Expected lambda");
-        }
+
+        let body = lambda_body(&typed_globals["main"]);
+
+        assert!(matches!(body[0], Value::Init { .. }));
+        assert_eq!(body[0].tpe(), Type::Int);
+        assert!(matches!(body[1], Value::Assign { .. }));
+        assert_eq!(body[1].tpe(), Type::Int);
+        assert!(matches!(body[2], Value::Var { .. }));
+        assert_eq!(body[2].tpe(), Type::Int);
     }
 
     #[test]
@@ -477,14 +482,14 @@ mod tests {
             (call("list", vec![var("Int"), int(1), int(2)]), Type::List { item: Box::new(Type::Int) }),
             (call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), Type::Dict { key: Box::new(Type::Text), value: Box::new(Type::Int) }),
             (call("not", vec![bool(true)]), Type::Bool),
-            (call("print", vec![text("a")]), Type::Record { fields: HashMap::new() }),
+            (call("print", vec![text("a")]), void()),
             (call("len", vec![call("list", vec![var("Int")])]), Type::Int),
             (call("has", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Bool),
             (call("get", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Int),
             (call("get", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Int),
-            (call("set", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), Type::Record { fields: HashMap::new() }),
-            (call("del", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a"), int(1)]), Type::Record { fields: HashMap::new() }),
-            (call("insert", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), Type::Record { fields: HashMap::new() }),
+            (call("set", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
+            (call("del", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a"), int(1)]), void()),
+            (call("insert", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
         ];
 
         for (c, tpe) in calls {
@@ -515,25 +520,25 @@ mod tests {
 
         // If with different types -> void
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(if_expr(bool(true), vec![int(1)], vec![text("a")])))]);
-        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
         
         // If with one empty branch -> void
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(if_expr(bool(true), vec![int(1)], vec![])))]);
-        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
 
         // While loop
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(while_loop(bool(true), vec![int(1)])))]);
-        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
 
         // For loop over list
         let list = call("list", vec![var("Int"), int(1)]);
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", list, vec![var("v")])))]);
-        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
 
         // For loop over dict
         let dict = call("dict", vec![var("Text"), var("Real"), text("a"), real(1.0)]);
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", dict, vec![var("k"), var("v")])))]);
-        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), Type::Record { fields: HashMap::new() });
+        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
     }
 
     #[test]
