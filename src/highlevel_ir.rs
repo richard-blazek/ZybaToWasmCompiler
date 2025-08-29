@@ -315,104 +315,134 @@ impl Env {
     }
 }
 
-fn code_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+fn gen_int(value: i64) -> (Vec<Instr>, Vec<i64>) {
+    (vec![Instr::PushInt { value }], vec![])
+}
+
+fn gen_real(value: f64) -> (Vec<Instr>, Vec<i64>) {
+    (vec![Instr::PushReal { value }], vec![])
+}
+
+fn gen_text(value: String) -> (Vec<Instr>, Vec<i64>) {
+    (vec![Instr::PushText { value }], vec![])
+}
+
+fn gen_bool(value: bool) -> (Vec<Instr>, Vec<i64>) {
+    (vec![Instr::PushBool { value }], vec![])
+}
+
+fn gen_var(name: String, tpe: builtin::Type, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    if env.is_global(&name) {
+        (vec![env.fetch_global(&name)], vec![])
+    } else {
+        let tpe = conv_type(tpe);
+        let id = env.local_id_by_name(&name);
+        (vec![Instr::GetLocal { id, tpe }], vec![])
+    }
+}
+
+fn gen_assign(name: String, value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let tpe = conv_type(value.tpe());
+    let id = env.local_id_by_name(&name);
+
+    let (mut code, locals) = gen_value(value, env);
+    code.push(Instr::SetLocal { id, tpe });
+    (code, locals)
+}
+
+fn gen_init(name: String, value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let tpe = conv_type(value.tpe());
+    let id = env.new_local(name.clone(), tpe.clone());
+
+    let (mut code, mut locals) = gen_value(value, env);
+    code.push(Instr::InitLocal { id, tpe });
+    locals.push(id);
+    (code, locals)
+}
+
+fn gen_record(fields: Vec<(String, Value)>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let values: Vec<_> = fields.into_iter().map(|(_, v)| v).collect();
+    let types = values.iter().map(|v| conv_type(v.tpe())).collect();
+
+    let (mut code, locals) = gen_values(values, env);
+    code.push(Instr::NewTuple { fields: types });
+    (code, locals)
+}
+
+fn gen_call(func: Value, args: Vec<Value>, ret: builtin::Type, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let args_t = args.iter().map(|a| conv_type(a.tpe())).collect();
+    let ret = conv_type(ret);
+
+    let (mut code, mut locals) = gen_values(args, env);
+    let (func_code, func_locals) = gen_value(func, env);
+    code.extend(func_code);
+    locals.extend(func_locals);
+
+    code.push(Instr::CallFunc { args: args_t, ret });
+    (code, locals)
+}
+
+fn gen_access(object: Value, field: String, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let fields = sorted(match object.tpe() {
+        builtin::Type::Record { fields } => fields,
+        _ => unreachable!(),
+    }, |(n, _)| n);
+
+    let i = fields.iter().position(|(n, _)| n == &field).unwrap();
+    let types = fields.into_iter().map(|(_, v)| conv_type(v)).collect();
+
+    let (mut code, locals) = gen_value(object, env);
+    code.push(Instr::GetField { fields: types, i });
+    (code, locals)
+}
+
+fn gen_if(cond: Value, then: Vec<Value>, elsë: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let if_not = env.new_label();
+    let end_if = env.new_label();
+
+    let (mut code, locals) = gen_value(cond, env);
+    code.push(Instr::JumpUnless { id: if_not });
+    code.extend(gen_block(then, env));
+    code.push(Instr::JumpAlways { id: end_if });
+    code.push(Instr::Label { id: if_not });
+    code.extend(gen_block(elsë, env));
+    code.push(Instr::Label { id: end_if });
+
+    (code, locals)
+}
+
+fn gen_while(cond: Value, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let leave = env.new_label();
+    let start = env.new_label();
+
+    let mut code = vec![Instr::Label { id: start }];
+    let (cond_code, locals) = gen_value(cond, env);
+    code.extend(cond_code);
+
+    code.push(Instr::JumpUnless { id: leave });
+    code.extend(gen_block(body, env));
+    code.push(Instr::JumpAlways { id: start });;
+    code.push(Instr::Label { id: leave });
+
+    (code, locals)
+}
+
+fn gen_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     use Value::*;
 
     match value {
-        Int { value, .. } => (vec![Instr::PushInt { value }], vec![]),
-        Real { value, .. } => (vec![Instr::PushReal { value }], vec![]),
-        Text { value, .. } => (vec![Instr::PushText { value }], vec![]),
-        Bool { value, .. } => (vec![Instr::PushBool { value }], vec![]),
-        Var { name, tpe } => {
-            if env.is_global(&name) {
-                (vec![env.fetch_global(&name)], vec![])
-            } else {
-                let tpe = conv_type(tpe);
-                let id = env.local_id_by_name(&name);
-                (vec![Instr::GetLocal { id, tpe }], vec![])
-            }
-        }
-        Assign { name, value, .. } => {
-            let tpe = conv_type(value.tpe());
-            let id = env.local_id_by_name(&name);
-
-            let (mut code, locals) = code_value(*value, env);
-            code.push(Instr::SetLocal { id, tpe });
-            (code, locals)
-        }
-        Init { name, value, .. } => {
-            let tpe = conv_type(value.tpe());
-            let id = env.new_local(name.clone(), tpe.clone());
-
-            let (mut code, mut locals) = code_value(*value, env);
-            code.push(Instr::InitLocal { id, tpe });
-            locals.push(id);
-            (code, locals)
-        }
-        Record { fields, .. } => {
-            let fields = sorted(fields, |(n, _)| n);
-            let values: Vec<_> = fields.into_iter().map(|(_, v)| v).collect();
-            let types = values.iter().map(|v| conv_type(v.tpe())).collect();
-
-            let (mut code, locals) = code_values(values, env);
-            code.push(Instr::NewTuple { fields: types });
-            (code, locals)
-        }
-        Call { func, args, tpe } => {
-            let arg_types = args.iter().map(|a| conv_type(a.tpe())).collect();
-            let ret_type = conv_type(tpe);
-
-            let (mut code, mut locals) = code_values(args, env);
-            let (func_code, func_locals) = code_value(*func, env);
-            code.extend(func_code);
-            locals.extend(func_locals);
-
-            code.push(Instr::CallFunc { args: arg_types, ret: ret_type });
-            (code, locals)
-        }
-        Access { object, field, .. } => {
-            let fields = sorted(match object.tpe() {
-                builtin::Type::Record { fields } => fields,
-                _ => unreachable!(),
-            }, |(n, _)| n);
-
-            let i = fields.iter().position(|(n, _)| n == &field).unwrap();
-            let types = fields.into_iter().map(|(_, v)| conv_type(v)).collect();
-
-            let (mut code, locals) = code_value(*object, env);
-            code.push(Instr::GetField { fields: types, i });
-            (code, locals)
-        }
-        If { cond, then, elsë, .. } => {
-            let if_not = env.new_label();
-            let end_if = env.new_label();
-
-            let (mut code, locals) = code_value(*cond, env);
-            code.push(Instr::JumpUnless { id: if_not });
-            code.extend(code_block(then, env));
-            code.push(Instr::JumpAlways { id: end_if });
-            code.push(Instr::Label { id: if_not });
-            code.extend(code_block(elsë, env));
-            code.push(Instr::Label { id: end_if });
-
-            (code, locals)
-        }
-        While { cond, body, .. } => {
-            let leave = env.new_label();
-            let start = env.new_label();
-
-            let mut code = vec![];
-            let (cond_code, locals) = code_value(*cond, env);
-
-            code.push(Instr::Label { id: start });
-            code.extend(cond_code);
-            code.push(Instr::JumpUnless { id: leave });
-            code.extend(code_block(body, env));
-            code.push(Instr::JumpAlways { id: start });;
-            code.push(Instr::Label { id: leave });
-
-            (code, locals)
-        }
+        Int { value, .. } => gen_int(value),
+        Real { value, .. } => gen_real(value),
+        Text { value, .. } => gen_text(value),
+        Bool { value, .. } => gen_bool(value),
+        Var { name, tpe } => gen_var(name, tpe, env),
+        Assign { name, value, .. } => gen_assign(name, *value, env),
+        Init { name, value, .. } => gen_init(name, *value, env),
+        Record { fields, .. } => gen_record(sorted(fields, |(n, _)| n), env),
+        Call { func, args, tpe } => gen_call(*func, args, tpe, env),
+        Access { object, field, .. } => gen_access(*object, field, env),
+        If { cond, then, elsë, .. } => gen_if(*cond, then, elsë, env),
+        While { cond, body, .. } => gen_while(*cond, body, env),
         Lambda { args, ret, body, tpe } => {
             todo!()
         }
@@ -425,19 +455,19 @@ fn code_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     }
 }
 
-fn code_values(vals: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+fn gen_values(vals: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     let mut code = vec![];
     let mut locals = vec![];
     for val in vals {
-        let (new_code, new_locals) = code_value(val, env);
+        let (new_code, new_locals) = gen_value(val, env);
         code.extend(new_code);
         locals.extend(new_locals);
     }
     (code, locals)
 }
 
-fn code_block(body: Vec<Value>, env: &mut Env) -> Vec<Instr> {
-    let (mut code, locals) = code_values(body, env);
+fn gen_block(body: Vec<Value>, env: &mut Env) -> Vec<Instr> {
+    let (mut code, locals) = gen_values(body, env);
     for local in locals {
         code.push(Instr::DropLocal {
             id: local,
@@ -459,7 +489,7 @@ pub fn codegen(main_name: &str, globals: HashMap<String, Value>) -> Program {
                     let id = env.new_local(arg_name, tpe.clone());
                     code.push(Instr::InitLocal { id, tpe });
                 }
-                code.extend(code_block(body, &mut env));
+                code.extend(gen_block(body, &mut env));
                 env.set_global(&name, Func { code });
             }
             _ => unreachable!()
