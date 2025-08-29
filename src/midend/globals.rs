@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::midend::ir::{Code, Instr, Type};
+use crate::midend::ir::{Func, Instr, Type};
 use crate::typecheck::Value;
 
 pub struct Globals {
-    funcs: Vec<Code>,
+    funcs: Vec<Func>,
     instrs: HashMap<String, Instr>,
     func_ids: HashMap<String, usize>,
     counter: usize,
@@ -53,7 +53,7 @@ impl Globals {
         }
 
         let mut funcs = vec![];
-        funcs.resize(counter as usize, vec![]);
+        funcs.resize(counter, Func::new(vec![], vec![]));
 
         Globals { instrs, funcs, func_ids, counter, labels: 0 }
     }
@@ -70,11 +70,11 @@ impl Globals {
         self.func_ids[name]
     }
 
-    pub fn set_func(&mut self, i: usize, func: Code) {
+    pub fn set_func(&mut self, i: usize, func: Func) {
         self.funcs[i] = func;
     }
 
-    pub fn add_lambda(&mut self, func: Code) -> usize {
+    pub fn add_lambda(&mut self, func: Func) -> usize {
         self.funcs[self.counter - 1] = func;
         self.counter += 1;
         self.counter - 1
@@ -85,7 +85,7 @@ impl Globals {
         self.labels - 1
     }
 
-    pub fn to_funcs(self) -> Vec<Code> {
+    pub fn to_funcs(self) -> Vec<Func> {
         self.funcs
     }
 }

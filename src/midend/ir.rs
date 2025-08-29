@@ -84,14 +84,6 @@ pub enum Instr {
     // stack after:  [any, fields[i]]
     GetField { fields: Vec<Type>, i: usize },
 
-    // stack before: [any, value of type=tpe]
-    // stack after: [any]
-    // new local with id=id and the given value created
-    InitLocal { id: usize, tpe: Type },
-
-    // the local with type=tpe, id=id dropped
-    DropLocal { id: usize, tpe: Type },
-
     // the local with type=tpe, id=id and a value=value
     // stack before: [any]
     // stack after: [any, value]
@@ -181,28 +173,42 @@ pub enum Instr {
     XorBool,
 }
 
-pub type Code = Vec<Instr>;
+#[derive(Debug, Clone, PartialEq)]
+pub struct Func {
+    code: Vec<Instr>,
+    locals: Vec<Type>
+}
+
+impl Func {
+    pub fn new(code: Vec<Instr>, locals: Vec<Type>) -> Func {
+        Func { code, locals }
+    }
+
+    pub fn code(&self) -> &Vec<Instr> {
+        &self.code
+    }
+
+    pub fn locals(&self) -> &Vec<Type> {
+        &self.locals
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    funcs: Vec<Code>,
+    funcs: Vec<Func>,
     entry: usize
 }
 
 impl Program {
-    pub fn new(funcs: Vec<Code>, entry: usize) -> Program {
+    pub fn new(funcs: Vec<Func>, entry: usize) -> Program {
         Program { funcs, entry }
     }
 
-    pub fn func(&self, i: usize) -> &Code {
-        &self.funcs[i]
+    pub fn funcs(&self) -> &Vec<Func> {
+        &self.funcs
     }
 
-    pub fn len(&self) -> usize {
-        self.funcs.len()
-    }
-
-    pub fn entry_idx(&self) -> usize {
+    pub fn entry(&self) -> usize {
         self.entry
     }
 }
