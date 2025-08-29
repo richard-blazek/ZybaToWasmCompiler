@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::builtin::*;
 use crate::error::{err, Fallible};
-use crate::nameres;
+use crate::nameres::Expr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -36,18 +36,17 @@ impl Value {
     }
 }
 
-fn check_type(tpe: &nameres::Value) -> Fallible<Type> {
-    use nameres::Value::*;
+fn check_type(tpe: &Expr) -> Fallible<Type> {
     match tpe {
-        Var { line, name } => {
+        Expr::Var { line, name } => {
             if let Some(tpe) = get_scalar_type(name) {
                 Ok(tpe)
             } else {
                 err(*line, format!("Type {} does not exist", name))
             }
         },
-        Call { line, func, args } => {
-            if let Var { name, .. } = *func.clone() {
+        Expr::Call { line, func, args } => {
+            if let Expr::Var { name, .. } = *func.clone() {
                 let args = args.iter().map(check_type).collect::<Fallible<Vec<_>>>()?;
                 if let Some(tpe) = get_generic_type(&name, &args) {
                     Ok(tpe)
@@ -58,7 +57,7 @@ fn check_type(tpe: &nameres::Value) -> Fallible<Type> {
                 err(*line, "Repeated brackets in type declaration".into())
             }
         }
-        Record { fields, .. } => {
+        Expr::Record { fields, .. } => {
             let mut new_fields = HashMap::new();
             for (name, tpe) in fields {
                 new_fields.insert(name.clone(), check_type(tpe)?);
@@ -69,17 +68,15 @@ fn check_type(tpe: &nameres::Value) -> Fallible<Type> {
     }
 }
 
-fn global_env(globals: &HashMap<String, nameres::Value>) -> Fallible<HashMap<String, Type>> {
-    use nameres::Value::*;
-
+fn global_env(globals: &HashMap<String, Expr>) -> Fallible<HashMap<String, Type>> {
     let mut env = HashMap::new();
     for (name, value) in globals {
         match value {
-            Int { .. } => env.insert(name.clone(), Type::Int),
-            Real { .. } => env.insert(name.clone(), Type::Real),
-            Text { .. } => env.insert(name.clone(), Type::Text),
-            Bool { .. } => env.insert(name.clone(), Type::Bool),
-            Lambda { args, ret, .. } => {
+            Expr::Int { .. } => env.insert(name.clone(), Type::Int),
+            Expr::Real { .. } => env.insert(name.clone(), Type::Real),
+            Expr::Text { .. } => env.insert(name.clone(), Type::Text),
+            Expr::Bool { .. } => env.insert(name.clone(), Type::Bool),
+            Expr::Lambda { args, ret, .. } => {
                 let ret = Box::new(check_type(ret)?);
                 let args = args.iter().map(|(_, t)| {
                     check_type(t)
@@ -113,14 +110,14 @@ fn check_var(name: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     Ok(Value::Var { name, tpe: var_type })
 }
 
-fn check_init(name: String, value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_init(name: String, value: Expr, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
     env.insert(name.clone(), value.tpe());
     let tpe = value.tpe();
     Ok(Value::Init { name, value, tpe })
 }
 
-fn check_assign(line: i64, name: String, value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_assign(line: i64, name: String, value: Expr, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
     let tpe = env.get(&name).unwrap().clone();
     if tpe != value.tpe() {
@@ -129,7 +126,7 @@ fn check_assign(line: i64, name: String, value: nameres::Value, env: &mut HashMa
     Ok(Value::Assign { name, value, tpe })
 }
 
-fn check_record(fields: HashMap<String, nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_record(fields: HashMap<String, Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let fields = fields.into_iter().map(|(name, value)| {
         Ok((name, check_value(value, env)?))
     }).collect::<Fallible<HashMap<_, _>>>()?;
@@ -141,7 +138,7 @@ fn check_record(fields: HashMap<String, nameres::Value>, env: &mut HashMap<Strin
     Ok(Value::Record { fields, tpe: record_tpe })
 }
 
-fn check_access(line: i64, object: nameres::Value, field: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_access(line: i64, object: Expr, field: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let object = Box::new(check_value(object, env)?);
     if let Type::Record { fields } = object.tpe() {
         if let Some(field_tpe) = fields.get(&field) {
@@ -154,7 +151,7 @@ fn check_access(line: i64, object: nameres::Value, field: String, env: &mut Hash
     }
 }
 
-fn check_if(cond: nameres::Value, then: Vec<nameres::Value>, elsë: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_if(cond: Expr, then: Vec<Expr>, elsë: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
     let then = then.into_iter().map(|v| {
         check_value(v, env)
@@ -172,7 +169,7 @@ fn check_if(cond: nameres::Value, then: Vec<nameres::Value>, elsë: Vec<nameres:
     Ok(Value::If { cond, then, elsë, tpe })
 }
 
-fn check_while(cond: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_while(cond: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let cond = Box::new(check_value(cond, env)?);
     let body = body.into_iter().map(|v| {
         check_value(v, env)
@@ -181,7 +178,7 @@ fn check_while(cond: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMa
     Ok(Value::While { cond, body, tpe })
 }
 
-fn check_for(line: i64, key: String, value: String, expr: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_for(line: i64, key: String, value: String, expr: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let expr = Box::new(check_value(expr, env)?);
     if let Type::List { item } = expr.tpe() {
         env.insert(key.clone(), Type::Int);
@@ -199,7 +196,7 @@ fn check_for(line: i64, key: String, value: String, expr: nameres::Value, body: 
     Ok(Value::For { key, value, expr, body, tpe })
 }
 
-fn check_lambda(line: i64, args: Vec<(String, nameres::Value)>, ret: nameres::Value, body: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_lambda(line: i64, args: Vec<(String, Expr)>, ret: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let args = args.into_iter().map(|(name, tpe)| {
         Ok((name, check_type(&tpe)?))
     }).collect::<Fallible<Vec<(String, Type)>>>()?;
@@ -223,7 +220,7 @@ fn check_lambda(line: i64, args: Vec<(String, nameres::Value)>, ret: nameres::Va
     }
 }
 
-fn check_call(line: i64, func: nameres::Value, args: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_call(line: i64, func: Expr, args: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let func = Box::new(check_value(func, env)?);
     if let Type::Func { args: expected, ret } = func.tpe() {
         if args.len() != expected.len() {
@@ -242,7 +239,7 @@ fn check_call(line: i64, func: nameres::Value, args: Vec<nameres::Value>, env: &
     }
 }
 
-fn check_builtin_call(line: i64, builtin: String, args: Vec<nameres::Value>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_builtin_call(line: i64, builtin: String, args: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let type_args = args.iter().map_while(|arg| {
         check_type(arg).ok()
     }).collect::<Vec<_>>();
@@ -261,7 +258,7 @@ fn check_builtin_call(line: i64, builtin: String, args: Vec<nameres::Value>, env
     }
 }
 
-fn check_bin_op(line: i64, name: String, lhs: nameres::Value, rhs: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
+fn check_bin_op(line: i64, name: String, lhs: Expr, rhs: Expr, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let lhs = check_value(lhs, env)?;
     let rhs = check_value(rhs, env)?;
     if let Some(tpe) = apply_builtin_op(&name, lhs.tpe(), rhs.tpe()) {
@@ -271,34 +268,51 @@ fn check_bin_op(line: i64, name: String, lhs: nameres::Value, rhs: nameres::Valu
     }
 }
 
-fn check_value(value: nameres::Value, env: &mut HashMap<String, Type>) -> Fallible<Value> {
-    use nameres::Value::*;
+fn check_value(value: Expr, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     match value {
-        Int { value, .. } => check_int(value),
-        Real { value, .. } => check_real(value),
-        Text { value, .. } => check_text(value),
-        Bool { value, .. } => check_bool(value),
-        Var { name, .. } => check_var(name, env),
-        Init { name, value, .. } => check_init(name, *value, env),
-        Assign { line, name, value } => check_assign(line, name, *value, env),
-        Record { fields, .. } => check_record(fields, env),
-        Access { line, object, field } => check_access(line, *object, field, env),
-        If { cond, then, elsë, .. } => check_if(*cond, then, elsë, env),
-        While { cond, body, .. } => check_while(*cond, body, env),
-        For { line, key, value, expr, body } => check_for(line, key, value, *expr, body, env),
-        Lambda { line, args, ret, body } => check_lambda(line, args, *ret, body, env),
-        Call { line, func, args } => {
-            if let Var { name, .. } = &*func && is_builtin_name(name) {
+        Expr::Int { value, .. } => check_int(value),
+        Expr::Real { value, .. } => check_real(value),
+        Expr::Text { value, .. } => check_text(value),
+        Expr::Bool { value, .. } => check_bool(value),
+        Expr::Var { name, .. } => check_var(name, env),
+        Expr::Init { name, value, .. } => {
+            check_init(name, *value, env)
+        }
+        Expr::Assign { line, name, value } => {
+            check_assign(line, name, *value, env)
+        }
+        Expr::Record { fields, .. } => {
+            check_record(fields, env)
+        }
+        Expr::Access { line, object, field } => {
+            check_access(line, *object, field, env)
+        }
+        Expr::If { cond, then, elsë, .. } => {
+            check_if(*cond, then, elsë, env)
+        }
+        Expr::While { cond, body, .. } => {
+            check_while(*cond, body, env)
+        }
+        Expr::For { line, key, value, expr, body } => {
+            check_for(line, key, value, *expr, body, env)
+        }
+        Expr::Lambda { line, args, ret, body } => {
+            check_lambda(line, args, *ret, body, env)
+        }
+        Expr::Call { line, func, args } => {
+            if let Expr::Var { name, .. } = &*func && is_builtin_name(name) {
                 check_builtin_call(line, name.clone(), args, env)
             } else {
                 check_call(line, *func, args, env)
             }
         }
-        BinOp { line, name, lhs, rhs } => check_bin_op(line, name, *lhs, *rhs, env)
+        Expr::BinOp { line, name, lhs, rhs } => {
+            check_bin_op(line, name, *lhs, *rhs, env)
+        }
     }
 }
 
-pub fn check(globals: HashMap<String, nameres::Value>) -> Fallible<HashMap<String, Value>> {
+pub fn check(globals: HashMap<String, Expr>) -> Fallible<HashMap<String, Value>> {
     let mut env = global_env(&globals)?;
     globals.into_iter().map(|(name, value)| {
         Ok((name, check_value(value, &mut env)?))
@@ -309,56 +323,53 @@ pub fn check(globals: HashMap<String, nameres::Value>) -> Fallible<HashMap<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nameres;
     use std::collections::HashMap;
 
-    // Helper functions to create nameres::Value variants for tests
     mod helpers {
         use super::*;
-        use nameres::Value;
 
-        pub fn int(value: i64) -> Value { Value::Int { line: 1, value } }
-        pub fn real(value: f64) -> Value { Value::Real { line: 1, value } }
-        pub fn text(value: &str) -> Value { Value::Text { line: 1, value: value.to_string() } }
-        pub fn bool(value: bool) -> Value { Value::Bool { line: 1, value } }
-        pub fn var(name: &str) -> Value { Value::Var { line: 1, name: name.to_string() } }
-        pub fn call(func: &str, args: Vec<Value>) -> Value {
-            Value::Call { line: 1, func: Box::new(var(func)), args }
+        pub fn int(value: i64) -> Expr { Expr::Int { line: 1, value } }
+        pub fn real(value: f64) -> Expr { Expr::Real { line: 1, value } }
+        pub fn text(value: &str) -> Expr { Expr::Text { line: 1, value: value.to_string() } }
+        pub fn bool(value: bool) -> Expr { Expr::Bool { line: 1, value } }
+        pub fn var(name: &str) -> Expr { Expr::Var { line: 1, name: name.to_string() } }
+        pub fn call(func: &str, args: Vec<Expr>) -> Expr {
+            Expr::Call { line: 1, func: Box::new(var(func)), args }
         }
-        pub fn bin_op(name: &str, lhs: Value, rhs: Value) -> Value {
-            Value::BinOp { line: 1, name: name.to_string(), lhs: Box::new(lhs), rhs: Box::new(rhs) }
+        pub fn bin_op(name: &str, lhs: Expr, rhs: Expr) -> Expr {
+            Expr::BinOp { line: 1, name: name.to_string(), lhs: Box::new(lhs), rhs: Box::new(rhs) }
         }
-        pub fn record(fields: Vec<(&str, Value)>) -> Value {
-            Value::Record { line: 1, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
+        pub fn record(fields: Vec<(&str, Expr)>) -> Expr {
+            Expr::Record { line: 1, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
         }
-        pub fn access(obj: Value, field: &str) -> Value {
-            Value::Access { line: 1, object: Box::new(obj), field: field.to_string() }
+        pub fn access(obj: Expr, field: &str) -> Expr {
+            Expr::Access { line: 1, object: Box::new(obj), field: field.to_string() }
         }
-        pub fn init(name: &str, value: Value) -> Value {
-            Value::Init { line: 1, name: name.to_string(), value: Box::new(value) }
+        pub fn init(name: &str, value: Expr) -> Expr {
+            Expr::Init { line: 1, name: name.to_string(), value: Box::new(value) }
         }
-        pub fn assign(name: &str, value: Value) -> Value {
-            Value::Assign { line: 1, name: name.to_string(), value: Box::new(value) }
+        pub fn assign(name: &str, value: Expr) -> Expr {
+            Expr::Assign { line: 1, name: name.to_string(), value: Box::new(value) }
         }
-        pub fn lambda(args: Vec<(&str, Value)>, ret_type: Value, body: Vec<Value>) -> Value {
-            Value::Lambda {
+        pub fn lambda(args: Vec<(&str, Expr)>, ret_type: Expr, body: Vec<Expr>) -> Expr {
+            Expr::Lambda {
                 line: 1,
                 args: args.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
                 ret: Box::new(ret_type),
                 body,
             }
         }
-        pub fn if_expr(cond: Value, then: Vec<Value>, elsë: Vec<Value>) -> Value {
-            Value::If { line: 1, cond: Box::new(cond), then, elsë }
+        pub fn if_expr(cond: Expr, then: Vec<Expr>, elsë: Vec<Expr>) -> Expr {
+            Expr::If { line: 1, cond: Box::new(cond), then, elsë }
         }
-        pub fn while_loop(cond: Value, body: Vec<Value>) -> Value {
-            Value::While { line: 1, cond: Box::new(cond), body }
+        pub fn while_loop(cond: Expr, body: Vec<Expr>) -> Expr {
+            Expr::While { line: 1, cond: Box::new(cond), body }
         }
-        pub fn for_loop(key: &str, value: &str, expr: Value, body: Vec<Value>) -> Value {
-            Value::For { line: 1, key: key.to_string(), value: value.to_string(), expr: Box::new(expr), body }
+        pub fn for_loop(key: &str, value: &str, expr: Expr, body: Vec<Expr>) -> Expr {
+            Expr::For { line: 1, key: key.to_string(), value: value.to_string(), expr: Box::new(expr), body }
         }
 
-        pub fn wrap_in_lambda(value: Value) -> Value {
+        pub fn wrap_in_lambda(value: Expr) -> Expr {
             lambda(vec![], record(vec![]), vec![value])
         }
     }
@@ -552,7 +563,7 @@ mod tests {
         check(HashMap::from([("a".to_string(), lambda(vec![], call("List", vec![call("List", vec![var("Int")])]), vec![]))])).expect_err("Missing return");
         
         // Repeated brackets in type
-        check(HashMap::from([("a".to_string(), lambda(vec![], nameres::Value::Call { line: 1, func: Box::new(call("List", vec![var("Int")])), args: vec![] }, vec![]))])).expect_err("Repeated brackets");
+        check(HashMap::from([("a".to_string(), lambda(vec![], Expr::Call { line: 1, func: Box::new(call("List", vec![var("Int")])), args: vec![] }, vec![]))])).expect_err("Repeated brackets");
 
         // Invalid type expression
         check(HashMap::from([("a".to_string(), lambda(vec![], int(1), vec![]))])).expect_err("Invalid type expression");

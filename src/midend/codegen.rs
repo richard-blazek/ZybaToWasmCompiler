@@ -172,7 +172,7 @@ fn collect_vars<'a, T: IntoIterator<Item=&'a Value>>(body: T) -> (HashSet<String
                 used.extend(new_used);
                 defined.extend(new_defined);
             }
-            Value::For { key, value, expr, body, tpe } => {
+            Value::For { key, value, expr, body, .. } => {
                 defined.insert(key.clone());
                 defined.insert(value.clone());
 

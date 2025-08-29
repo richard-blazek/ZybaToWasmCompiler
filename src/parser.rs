@@ -19,27 +19,27 @@ use crate::lexer::{Token, tokenize};
 // <for> ::= "for" <name> ("," <name>)? ":" <expr> <block>
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
+pub enum Tree {
     Int { line: i64, value: i64 },
     Real { line: i64, value: f64 },
     Text { line: i64, value: String },
     Bool { line: i64, value: bool },
-    Record { line: i64, fields: HashMap<String, Expr> },
+    Record { line: i64, fields: HashMap<String, Tree> },
     Var { line: i64, ns: Option<String>, name: String },
-    Call { line: i64, func: Box<Expr>, args: Vec<Expr> },
-    BinOp { line: i64, name: String, lhs: Box<Expr>, rhs: Box<Expr> },
-    Access { line: i64, object: Box<Expr>, field: String },
-    Lambda { line: i64, args: Vec<(String, Expr)>, ret: Box<Expr>, body: Vec<Expr> },
-    Assign { line: i64, name: String, expr: Box<Expr> },
-    If { line: i64, cond: Box<Expr>, then: Vec<Expr>, elsë: Vec<Expr> },
-    While { line: i64, cond: Box<Expr>, body: Vec<Expr> },
-    For { line: i64, key: Option<String>, value: String, expr: Box<Expr>, body: Vec<Expr> }
+    Call { line: i64, func: Box<Tree>, args: Vec<Tree> },
+    BinOp { line: i64, name: String, lhs: Box<Tree>, rhs: Box<Tree> },
+    Access { line: i64, object: Box<Tree>, field: String },
+    Lambda { line: i64, args: Vec<(String, Tree)>, ret: Box<Tree>, body: Vec<Tree> },
+    Assign { line: i64, name: String, expr: Box<Tree> },
+    If { line: i64, cond: Box<Tree>, then: Vec<Tree>, elsë: Vec<Tree> },
+    While { line: i64, cond: Box<Tree>, body: Vec<Tree> },
+    For { line: i64, key: Option<String>, value: String, expr: Box<Tree>, body: Vec<Tree> }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Import { line: i64, path: String },
-    Const { line: i64, name: String, expr: Expr, private: bool },
+    Const { line: i64, name: String, expr: Tree, private: bool },
 }
 
 fn expect(tokens: &[Token], i: usize, sep: char) -> Fallible<usize> {
@@ -50,12 +50,12 @@ fn expect(tokens: &[Token], i: usize, sep: char) -> Fallible<usize> {
     }
 }
 
-fn parse_atom(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
+fn parse_atom(tokens: &[Token], i: usize) -> Fallible<(usize, Tree)> {
     match &tokens[i] {
-        Token::Int { line, value } => Ok((i + 1, Expr::Int { line: *line, value: *value })),
-        Token::Real { line, value } => Ok((i + 1, Expr::Real { line: *line, value: *value })),
-        Token::Text { line, value } => Ok((i + 1, Expr::Text { line: *line, value: value.clone() })),
-        Token::Bool { line, value } => Ok((i + 1, Expr::Bool { line: *line, value: *value })),
+        Token::Int { line, value } => Ok((i + 1, Tree::Int { line: *line, value: *value })),
+        Token::Real { line, value } => Ok((i + 1, Tree::Real { line: *line, value: *value })),
+        Token::Text { line, value } => Ok((i + 1, Tree::Text { line: *line, value: value.clone() })),
+        Token::Bool { line, value } => Ok((i + 1, Tree::Bool { line: *line, value: *value })),
         Token::Separator { line, name: '(' } => parse_parentheses(tokens, i + 1, *line),
         Token::Name { line, name } if name == "fun" => parse_fun(tokens, i + 1, *line),
         Token::Name { line, name } if name == "if" => parse_if(tokens, i + 1, *line),
@@ -72,9 +72,9 @@ fn parse_atom(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
     }
 }
 
-fn parse_parentheses(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
+fn parse_parentheses(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Tree)> {
     if let Token::Separator { name: ')', .. } = &tokens[i] {
-        Ok((i + 1, Expr::Record { line, fields: HashMap::new() }))
+        Ok((i + 1, Tree::Record { line, fields: HashMap::new() }))
     } else if let Some(Token::Separator { name: ':', .. }) = tokens.get(i + 1) {
         parse_record(tokens, i, line)
     } else {
@@ -84,7 +84,7 @@ fn parse_parentheses(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, 
     }
 }
 
-fn parse_key_value_pairs(tokens: &[Token], i: usize, end: char) -> Fallible<(usize, Vec<(String, Expr)>)> {
+fn parse_key_value_pairs(tokens: &[Token], i: usize, end: char) -> Fallible<(usize, Vec<(String, Tree)>)> {
     let mut i = i;
     let mut keys = HashSet::new();
     let mut pairs = Vec::new();
@@ -114,36 +114,36 @@ fn parse_key_value_pairs(tokens: &[Token], i: usize, end: char) -> Fallible<(usi
     }
 }
 
-fn parse_record(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
+fn parse_record(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Tree)> {
     let (i, fields) = parse_key_value_pairs(tokens, i, ')')?;
-    Ok((i, Expr::Record { line: line, fields: fields.into_iter().collect() }))
+    Ok((i, Tree::Record { line: line, fields: fields.into_iter().collect() }))
 }
 
-fn parse_var(tokens: &[Token], i: usize, line: i64, first_name: String) -> Fallible<(usize, Expr)> {
+fn parse_var(tokens: &[Token], i: usize, line: i64, first_name: String) -> Fallible<(usize, Tree)> {
     if let (Some(Token::Separator { name: ':', .. }),
             Some(Token::Separator { name: ':', .. }),
             Some(Token::Name { name, .. })) = (tokens.get(i), tokens.get(i + 1), tokens.get(i + 2)) {
-        Ok((i + 3, Expr::Var { line, ns: Some(first_name), name: name.clone() }))
+        Ok((i + 3, Tree::Var { line, ns: Some(first_name), name: name.clone() }))
     } else {
-        Ok((i, Expr::Var { line, ns: None, name: first_name}))
+        Ok((i, Tree::Var { line, ns: None, name: first_name}))
     }
 }
 
-fn parse_arguments(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<(String, Expr)>)> {
+fn parse_arguments(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<(String, Tree)>)> {
     let i = expect(tokens, i, '[')?;
     parse_key_value_pairs(tokens, i, ']')
 }
 
-fn parse_fun(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
+fn parse_fun(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Tree)> {
     let (i, args) = parse_arguments(tokens, i)?;
     let (i, ret) = parse_expr(tokens, i)?;
     let (i, body) = parse_block(tokens, i)?;
-    Ok((i, Expr::Lambda { line, args, ret: Box::new(ret), body }))
+    Ok((i, Tree::Lambda { line, args, ret: Box::new(ret), body }))
 }
 
-fn parse_access(tokens: &[Token], i: usize, line: i64, object: Expr) -> Fallible<(usize, Expr)> {
+fn parse_access(tokens: &[Token], i: usize, line: i64, object: Tree) -> Fallible<(usize, Tree)> {
     if let Token::Name { name, .. } = &tokens[i] {
-        let access = Expr::Access {
+        let access = Tree::Access {
             line: line,
             object: Box::new(object),
             field: name.clone(),
@@ -154,9 +154,9 @@ fn parse_access(tokens: &[Token], i: usize, line: i64, object: Expr) -> Fallible
     }
 }
 
-fn parse_call(tokens: &[Token], i: usize, line: i64, func: Expr) -> Fallible<(usize, Expr)> {
+fn parse_call(tokens: &[Token], i: usize, line: i64, func: Tree) -> Fallible<(usize, Tree)> {
     if let Token::Separator { name: ']', .. } = &tokens[i] {
-        return Ok((i + 1, Expr::Call { line: line, func: Box::new(func), args: vec![] }));
+        return Ok((i + 1, Tree::Call { line: line, func: Box::new(func), args: vec![] }));
     }
 
     let mut i = i;
@@ -169,14 +169,14 @@ fn parse_call(tokens: &[Token], i: usize, line: i64, func: Expr) -> Fallible<(us
         match &tokens[i] {
             Token::Separator { name: ',', .. } => i += 1,
             Token::Separator { name: ']', .. } => {
-                return Ok((i + 1, Expr::Call { line: line, func: Box::new(func), args: args }));
+                return Ok((i + 1, Tree::Call { line: line, func: Box::new(func), args: args }));
             }
             token => err(token.line(), format!("Expected a comma or a parenthesis but got {:?}", token))?
         }
     }
 }
 
-fn parse_operand(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
+fn parse_operand(tokens: &[Token], i: usize) -> Fallible<(usize, Tree)> {
     let (mut i, mut value) = parse_atom(tokens, i)?;
     loop {
         match &tokens[i] {
@@ -191,7 +191,7 @@ fn parse_operand(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
     }
 }
 
-fn parse_operation(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
+fn parse_operation(tokens: &[Token], i: usize) -> Fallible<(usize, Tree)> {
     let (mut i, mut value) = parse_operand(tokens, i)?;
     loop {
         match &tokens[i] {
@@ -201,7 +201,7 @@ fn parse_operation(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
                 }
                 let (new_i, rhs) = parse_operand(tokens, i + 1)?;
                 i = new_i;
-                value = Expr::BinOp {
+                value = Tree::BinOp {
                     line: *line,
                     name: name.clone(),
                     lhs: Box::new(value),
@@ -213,33 +213,33 @@ fn parse_operation(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
     }
 }
 
-fn parse_if(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
+fn parse_if(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Tree)> {
     let (i, cond) = parse_expr(tokens, i)?;
     let (i, then) = parse_block(tokens, i)?;
     let cond = Box::new(cond);
 
     if let Token::Name { name, .. } = &tokens[i] && name == "else" {
         let (i, elsë) = parse_block(tokens, i + 1)?;
-        Ok((i, Expr::If { line, cond, then, elsë }))
+        Ok((i, Tree::If { line, cond, then, elsë }))
     } else if let Token::Name { name, .. } = &tokens[i] && name == "elif" {
         let (i, elif) = parse_if(tokens, i + 1, line)?;
-        Ok((i, Expr::If { line, cond, then, elsë: vec![elif] }))
+        Ok((i, Tree::If { line, cond, then, elsë: vec![elif] }))
     } else {
-        Ok((i, Expr::If { line, cond, then, elsë: vec![] }))
+        Ok((i, Tree::If { line, cond, then, elsë: vec![] }))
     }
 }
 
-fn parse_expr(tokens: &[Token], i: usize) -> Fallible<(usize, Expr)> {
+fn parse_expr(tokens: &[Token], i: usize) -> Fallible<(usize, Tree)> {
     match (&tokens[i], tokens.get(i + 1)) {
         (Token::Name { line, name }, Some(Token::Operator { name: op, .. })) if op == "=" => {
             let (i, value) = parse_operation(tokens, i + 2)?;
-            Ok((i, Expr::Assign { line: *line, name: name.clone(), expr: Box::new(value) }))
+            Ok((i, Tree::Assign { line: *line, name: name.clone(), expr: Box::new(value) }))
         }
         _ => parse_operation(tokens, i)
     }
 }
 
-fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Expr>)> {
+fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Tree>)> {
     let mut i = expect(tokens, i, '{')?;
     let mut body = vec![];
 
@@ -257,24 +257,24 @@ fn parse_block(tokens: &[Token], i: usize) -> Fallible<(usize, Vec<Expr>)> {
     }
 }
 
-fn parse_while(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Expr)> {
+fn parse_while(tokens: &[Token], i: usize, line: i64) -> Fallible<(usize, Tree)> {
     let (i, cond) = parse_expr(tokens, i)?;
     let (i, body) = parse_block(tokens, i)?;
-    Ok((i, Expr::While { line, cond: Box::new(cond), body }))
+    Ok((i, Tree::While { line, cond: Box::new(cond), body }))
 }
 
-fn parse_for(tokens: &[Token], i: usize, line: i64, var1: String) -> Fallible<(usize, Expr)> {
+fn parse_for(tokens: &[Token], i: usize, line: i64, var1: String) -> Fallible<(usize, Tree)> {
     if let Token::Separator { name: ':', .. } = &tokens[i] {
         let (i, expr) = parse_expr(tokens, i + 1)?;
         let (i, body) = parse_block(tokens, i)?;
-        Ok((i, Expr::For { line, key: None, value: var1, expr: Box::new(expr), body }))
+        Ok((i, Tree::For { line, key: None, value: var1, expr: Box::new(expr), body }))
     } else {
         let i = expect(tokens, i, ',')?;
         if let Token::Name { name: var2, .. } = &tokens[i] {
             let i = expect(tokens, i + 1, ':')?;
             let (i, expr) = parse_expr(tokens, i)?;
             let (i, body) = parse_block(tokens, i)?;
-            Ok((i, Expr::For { line, key: Some(var1), value: var2.clone(), expr: Box::new(expr), body }))
+            Ok((i, Tree::For { line, key: Some(var1), value: var2.clone(), expr: Box::new(expr), body }))
         } else {
             err(line, "Expected a variable name".into())
         }
@@ -382,7 +382,7 @@ mod parser_tests {
 
         assert!(matches!(parsed[1].clone(), Decl::Const {
             name,
-            expr: Expr::Int { value, .. },
+            expr: Tree::Int { value, .. },
             ..
         } if name == "x" && value == 123));
     }
@@ -390,7 +390,7 @@ mod parser_tests {
     #[test]
     fn test_atoms_int_real_text_bool() {
         use Decl::Const;
-        use Expr::{Int, Real, Text, Bool};
+        use Tree::{Int, Real, Text, Bool};
 
         let src = r#"
             private a = 123;
@@ -420,12 +420,12 @@ mod parser_tests {
             }
         }
 
-        assert_eq!(map.get("r0"), Some(&Expr::Record { line: 1, fields: HashMap::new() }));
+        assert_eq!(map.get("r0"), Some(&Tree::Record { line: 1, fields: HashMap::new() }));
 
         let mut fields = HashMap::new();
-        fields.insert("a".to_string(), Expr::Int { line: 1, value: 123 });
-        fields.insert("b".to_string(), Expr::Real { line: 1, value: 3.14 });
-        assert_eq!(map.get("r1"), Some(&Expr::Record { line: 1, fields }));
+        fields.insert("a".to_string(), Tree::Int { line: 1, value: 123 });
+        fields.insert("b".to_string(), Tree::Real { line: 1, value: 3.14 });
+        assert_eq!(map.get("r1"), Some(&Tree::Record { line: 1, fields }));
     }
 
     #[test]
@@ -434,14 +434,14 @@ mod parser_tests {
         let parsed = parse(src).expect("parse ns var and access");
 
         if let Decl::Const { name, expr, .. } = &parsed[0] && name == "v" {
-            assert_eq!(*expr, Expr::Var { line: 1, ns: Some("ns".to_string()), name: "id".to_string() });
+            assert_eq!(*expr, Tree::Var { line: 1, ns: Some("ns".to_string()), name: "id".to_string() });
         } else {
             panic!("v not parsed correctly")
         }
 
         if let Decl::Const { name, expr, .. } = &parsed[1] && name == "a" {
-            let obj = Expr::Var { line: 1, ns: Some("ns".to_string()), name: "obj".to_string() };
-            assert_eq!(*expr, Expr::Access { line: 1, object: Box::new(obj), field: "field".to_string() });
+            let obj = Tree::Var { line: 1, ns: Some("ns".to_string()), name: "obj".to_string() };
+            assert_eq!(*expr, Tree::Access { line: 1, object: Box::new(obj), field: "field".to_string() });
         } else {
             panic!("a not parsed correctly")
         }
@@ -459,21 +459,21 @@ mod parser_tests {
         };
 
         match c {
-            Expr::Assign { name, expr, .. } => {
+            Tree::Assign { name, expr, .. } => {
                 assert_eq!(name, "a");
 
                 match *expr {
-                    Expr::BinOp { name: op1, lhs, rhs, .. } => {
+                    Tree::BinOp { name: op1, lhs, rhs, .. } => {
                         assert_eq!(op1, "+");
                         match *lhs {
-                            Expr::BinOp { name: op2, lhs: lhs2, rhs: rhs2, .. } => {
+                            Tree::BinOp { name: op2, lhs: lhs2, rhs: rhs2, .. } => {
                                 assert_eq!(op2, "+");
-                                assert_eq!(*lhs2, Expr::Int { line: 1, value: 1 });
-                                assert_eq!(*rhs2, Expr::Int { line: 1, value: 2 });
+                                assert_eq!(*lhs2, Tree::Int { line: 1, value: 1 });
+                                assert_eq!(*rhs2, Tree::Int { line: 1, value: 2 });
                             }
                             _ => panic!("left of top-level + is not a binop"),
                         }
-                        assert_eq!(*rhs, Expr::Int { line: 1, value: 3 });
+                        assert_eq!(*rhs, Tree::Int { line: 1, value: 3 });
                     }
                     _ => panic!("assignment rhs not a BinOp"),
                 }
@@ -491,14 +491,14 @@ mod parser_tests {
             _ => None,
         }).expect("const x missing");
 
-        let expected = Expr::Call {
-            line: 1, func: Box::new(Expr::Access {
+        let expected = Tree::Call {
+            line: 1, func: Box::new(Tree::Access {
                 line: 1,
-                object: Box::new(Expr::Call {
+                object: Box::new(Tree::Call {
                     line: 1,
-                    func: Box::new(Expr::Access { 
+                    func: Box::new(Tree::Access { 
                         line: 1,
-                        object: Box::new(Expr::Var {
+                        object: Box::new(Tree::Var {
                             line: 1,
                             ns: None,
                             name: "a".to_string()
@@ -506,8 +506,8 @@ mod parser_tests {
                         field: "b".to_string()
                     }),
                     args: vec![
-                        Expr::Int { line: 1, value: 1 },
-                        Expr::Int { line: 1, value: 2 }
+                        Tree::Int { line: 1, value: 1 },
+                        Tree::Int { line: 1, value: 2 }
                     ],
                 }),
                 field: "c".to_string()
@@ -536,15 +536,15 @@ mod parser_tests {
         };
 
         match c {
-            Expr::If { cond, then, elsë, .. } => {
-                assert!(matches!(*cond, Expr::Bool { value: true, .. }));
-                assert!(matches!(&then[..], &[Expr::Int { value: 1, .. }]));
+            Tree::If { cond, then, elsë, .. } => {
+                assert!(matches!(*cond, Tree::Bool { value: true, .. }));
+                assert!(matches!(&then[..], &[Tree::Int { value: 1, .. }]));
                 assert_eq!(elsë.len(), 1);
                 match elsë[0].clone() {
-                    Expr::If { cond, then, elsë, .. } => {
-                        assert!(matches!(*cond, Expr::Bool { value: false, .. }));
-                        assert!(matches!(&then[..], &[Expr::Int { value: 2, .. }]));
-                        assert!(matches!(&elsë[..], &[Expr::Int { value: 3, .. }]));
+                    Tree::If { cond, then, elsë, .. } => {
+                        assert!(matches!(*cond, Tree::Bool { value: false, .. }));
+                        assert!(matches!(&then[..], &[Tree::Int { value: 2, .. }]));
+                        assert!(matches!(&elsë[..], &[Tree::Int { value: 3, .. }]));
                     }
                     _ => panic!("should be if")
                 }
@@ -553,9 +553,9 @@ mod parser_tests {
         }
 
         match d {
-            Expr::If { cond, then, elsë, .. } => {
-                assert!(matches!(*cond, Expr::Bool { value: true, .. }));
-                assert!(matches!(&then[..], &[Expr::Int { value: 1, .. }]));
+            Tree::If { cond, then, elsë, .. } => {
+                assert!(matches!(*cond, Tree::Bool { value: true, .. }));
+                assert!(matches!(&then[..], &[Tree::Int { value: 1, .. }]));
                 assert!(elsë.is_empty());
             }
             _ => panic!("should be if")
@@ -574,29 +574,29 @@ mod parser_tests {
         }
 
         match found.get("w") {
-            Some(Expr::While { cond, body, .. }) => {
-                assert_eq!(**cond, Expr::Bool { line: 1, value: true });
-                assert_eq!(body, &vec![Expr::Int { line: 1, value: 1 }]);
+            Some(Tree::While { cond, body, .. }) => {
+                assert_eq!(**cond, Tree::Bool { line: 1, value: true });
+                assert_eq!(body, &vec![Tree::Int { line: 1, value: 1 }]);
             }
             _ => panic!("w not parsed into While"),
         }
 
         match found.get("f1") {
-            Some(Expr::For { key, value, expr, body, .. }) => {
+            Some(Tree::For { key, value, expr, body, .. }) => {
                 assert_eq!(key, &None);
                 assert_eq!(value, "v");
-                assert_eq!(**expr, Expr::Var { line: 1, ns: None, name: "arr".to_string() });
-                assert_eq!(body, &vec![Expr::Var { line: 1, ns: None, name: "v".to_string() }]);
+                assert_eq!(**expr, Tree::Var { line: 1, ns: None, name: "arr".to_string() });
+                assert_eq!(body, &vec![Tree::Var { line: 1, ns: None, name: "v".to_string() }]);
             }
             _ => panic!("f1 not parsed into For"),
         }
 
         match found.get("f2") {
-            Some(Expr::For { key, value, expr, body, .. }) => {
+            Some(Tree::For { key, value, expr, body, .. }) => {
                 assert_eq!(key, &Some("k".to_string()));
                 assert_eq!(value, "v");
-                assert_eq!(**expr, Expr::Var { line: 1, ns: None, name: "map".to_string() });
-                assert_eq!(body, &vec![Expr::Var { line: 1, ns: None, name: "k".to_string() }]);
+                assert_eq!(**expr, Tree::Var { line: 1, ns: None, name: "map".to_string() });
+                assert_eq!(body, &vec![Tree::Var { line: 1, ns: None, name: "k".to_string() }]);
             }
             _ => panic!("f2 not parsed into For"),
         }
@@ -613,7 +613,7 @@ mod parser_tests {
         }).expect("const L not found");
 
         match lambda_expr.clone() {
-            Expr::Lambda { args, ret: _rt, body, .. } => {
+            Tree::Lambda { args, ret: _rt, body, .. } => {
                 // args should include x and y with their types (we used 123 and 3.14 as dummy type expressions in source)
                 assert_eq!(args.len(), 2);
                 assert_eq!(args[0].0, "x");
@@ -621,11 +621,11 @@ mod parser_tests {
                 // body should contain an assignment expression
                 assert_eq!(body.len(), 1);
                 match &body[0] {
-                    Expr::Assign { name, expr, .. } => {
+                    Tree::Assign { name, expr, .. } => {
                         assert_eq!(name, "x");
                         // rhs should be BinOp
                         match **expr {
-                            Expr::BinOp { name: ref op, .. } => assert_eq!(op, "+"),
+                            Tree::BinOp { name: ref op, .. } => assert_eq!(op, "+"),
                             _ => panic!("lambda assignment rhs is not binop"),
                         }
                     }
@@ -654,12 +654,12 @@ mod parser_tests {
         }
 
         match &parsed[2] {
-            Decl::Const { name, expr: Expr::Lambda { body, .. }, .. } => {
+            Decl::Const { name, expr: Tree::Lambda { body, .. }, .. } => {
                 assert_eq!(name, "b");
                 assert_eq!(body.len(), 3);
-                assert!(matches!(body[0], Expr::Int { value: 1, .. }));
-                assert!(matches!(body[1], Expr::Int { value: 2, .. }));
-                assert!(matches!(body[2], Expr::Int { value: 3, .. }));
+                assert!(matches!(body[0], Tree::Int { value: 1, .. }));
+                assert!(matches!(body[1], Tree::Int { value: 2, .. }));
+                assert!(matches!(body[2], Tree::Int { value: 3, .. }));
             }
             _ => panic!("should be lambda")
         }

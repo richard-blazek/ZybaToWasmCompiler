@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::builtin::is_builtin_name;
 use crate::error::{err, Fallible};
-use crate::parser::{Decl, Expr};
+use crate::parser::{Decl, Tree};
 
 fn builtin_check(line: i64, name: &str) -> Fallible<()> {
     if is_builtin_name(name) {
@@ -13,27 +13,27 @@ fn builtin_check(line: i64, name: &str) -> Fallible<()> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value {
+pub enum Expr {
     Int { line: i64, value: i64 },
     Real { line: i64, value: f64 },
     Text { line: i64, value: String },
     Bool { line: i64, value: bool },
-    Record { line: i64, fields: HashMap<String, Value> },
+    Record { line: i64, fields: HashMap<String, Expr> },
     Var { line: i64, name: String },
-    Call { line: i64, func: Box<Value>, args: Vec<Value> },
-    BinOp { line: i64, name: String, lhs: Box<Value>, rhs: Box<Value> },
-    Access { line: i64, object: Box<Value>, field: String },
-    Lambda { line: i64, args: Vec<(String, Value)>, ret: Box<Value>, body: Vec<Value> },
-    Init { line: i64, name: String, value: Box<Value> },
-    Assign { line: i64, name: String, value: Box<Value> },
-    If { line: i64, cond: Box<Value>, then: Vec<Value>, elsë: Vec<Value> },
-    While { line: i64, cond: Box<Value>, body: Vec<Value> },
-    For { line: i64, key: String, value: String, expr: Box<Value>, body: Vec<Value> },
+    Call { line: i64, func: Box<Expr>, args: Vec<Expr> },
+    BinOp { line: i64, name: String, lhs: Box<Expr>, rhs: Box<Expr> },
+    Access { line: i64, object: Box<Expr>, field: String },
+    Lambda { line: i64, args: Vec<(String, Expr)>, ret: Box<Expr>, body: Vec<Expr> },
+    Init { line: i64, name: String, value: Box<Expr> },
+    Assign { line: i64, name: String, value: Box<Expr> },
+    If { line: i64, cond: Box<Expr>, then: Vec<Expr>, elsë: Vec<Expr> },
+    While { line: i64, cond: Box<Expr>, body: Vec<Expr> },
+    For { line: i64, key: String, value: String, expr: Box<Expr>, body: Vec<Expr> },
 }
 
-impl Value {
+impl Expr {
     pub fn line(&self) -> i64 {
-        use Value::*;
+        use Expr::*;
         match self {
             Int { line, .. } | Real { line, .. } | Text { line, .. }
             | Bool { line, .. } | Record { line, .. } | Var { line, .. }
@@ -164,26 +164,26 @@ impl<'a> Environment for LocalEnv<'a> {
     }
 }
 
-fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
+fn nameres_expr(e: Tree, ns_path: &str, env: &mut LocalEnv) -> Fallible<Expr> {
     match e {
-        Expr::Int { line, value } => Ok(Value::Int { line, value }),
-        Expr::Real { line, value } => Ok(Value::Real { line, value }),
-        Expr::Text { line, value } => Ok(Value::Text { line, value }),
-        Expr::Bool { line, value } => Ok(Value::Bool { line, value }),
-        Expr::Var { line, ns: None, name } if is_builtin_name(&name) => {
-            Ok(Value::Var { line, name })
+        Tree::Int { line, value } => Ok(Expr::Int { line, value }),
+        Tree::Real { line, value } => Ok(Expr::Real { line, value }),
+        Tree::Text { line, value } => Ok(Expr::Text { line, value }),
+        Tree::Bool { line, value } => Ok(Expr::Bool { line, value }),
+        Tree::Var { line, ns: None, name } if is_builtin_name(&name) => {
+            Ok(Expr::Var { line, name })
         }
-        Expr::Var { line, ns: None, name } => {
+        Tree::Var { line, ns: None, name } => {
             if let Some((name, _)) = env.get_var(ns_path, &name) {
-                Ok(Value::Var { line, name })
+                Ok(Expr::Var { line, name })
             } else {
                 err(line, format!("Undefined identifier {}", name))
             }
         }
-        Expr::Var { line, ns: Some(ns_name), name } => {
+        Tree::Var { line, ns: Some(ns_name), name } => {
             if let Some(ns_path) = env.get_ns(ns_path, &ns_name) {
                 if let Some((name, _)) = env.get_var(&ns_path, &name) {
-                    Ok(Value::Var { line, name })
+                    Ok(Expr::Var { line, name })
                 } else {
                     err(line, format!("Undefined identifier {}", name))
                 }
@@ -191,31 +191,31 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
                 err(line, format!("Unknown module {}", ns_name))
             }
         }
-        Expr::BinOp { line, name, lhs, rhs } => Ok(Value::BinOp {
+        Tree::BinOp { line, name, lhs, rhs } => Ok(Expr::BinOp {
             line,
             name,
             lhs: Box::new(nameres_expr(*lhs, ns_path, env)?),
             rhs: Box::new(nameres_expr(*rhs, ns_path, env)?)
         }),
-        Expr::Access { line, object, field } => Ok(Value::Access {
+        Tree::Access { line, object, field } => Ok(Expr::Access {
             line,
             object: Box::new(nameres_expr(*object, ns_path, env)?),
             field
         }),
-        Expr::Call { line, func, args } => Ok(Value::Call {
+        Tree::Call { line, func, args } => Ok(Expr::Call {
             line,
             func: Box::new(nameres_expr(*func, ns_path, env)?),
             args: args.into_iter().map(|arg| {
                 nameres_expr(arg, ns_path, env)
             }).collect::<Fallible<Vec<_>>>()?
         }),
-        Expr::Record { line, fields } => Ok(Value::Record {
+        Tree::Record { line, fields } => Ok(Expr::Record {
             line,
             fields: fields.into_iter().map(|(key, value)| {
                 Ok((key, nameres_expr(value, ns_path, env)?))
             }).collect::<Fallible<HashMap<_, _>>>()?
         }),
-        Expr::Lambda { line, args, ret, body } => {
+        Tree::Lambda { line, args, ret, body } => {
             let mut inner = LocalEnv::new_scope(env);
 
             let args = args.into_iter().map(|(name, tpe)| {
@@ -231,27 +231,27 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
             let ret = nameres_expr(*ret, ns_path, &mut inner)?;
             let body = nameres_exprs(body, ns_path, inner)?;
 
-            Ok(Value::Lambda {
+            Ok(Expr::Lambda {
                 line,
                 args,
                 ret: Box::new(ret),
                 body
             })
         }
-        Expr::Assign { line, name, expr: value } => {
+        Tree::Assign { line, name, expr: value } => {
             builtin_check(line, &name)?;
             let value = nameres_expr(*value, ns_path, env)?;
             let var = env.get_var(ns_path, &name);
             if let Some((_, false)) = var {
                 err(line, format!("Cannot reassign a constant {}", name))
             } else if let Some((name, true)) = var {
-                Ok(Value::Assign { line, name, value: Box::new(value) })
+                Ok(Expr::Assign { line, name, value: Box::new(value) })
             } else {
                 let name = env.add_var(&name).unwrap();
-                Ok(Value::Init { line, name, value: Box::new(value) })
+                Ok(Expr::Init { line, name, value: Box::new(value) })
             }
         }
-        Expr::If { line, cond, then, elsë } => Ok(Value::If {
+        Tree::If { line, cond, then, elsë } => Ok(Expr::If {
             line,
             cond: Box::new(
                 nameres_expr(*cond, ns_path, &mut LocalEnv::new_scope(env))?
@@ -259,14 +259,14 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
             then: nameres_exprs(then, ns_path, LocalEnv::new_scope(env))?,
             elsë: nameres_exprs(elsë, ns_path, LocalEnv::new_scope(env))?
         }),
-        Expr::While { line, cond, body } => Ok(Value::While {
+        Tree::While { line, cond, body } => Ok(Expr::While {
             line,
             cond: Box::new(
                 nameres_expr(*cond, ns_path, &mut LocalEnv::new_scope(env))?
             ),
             body: nameres_exprs(body, ns_path, LocalEnv::new_scope(env))?
         }),
-        Expr::For { line, key, value, expr, body } => {
+        Tree::For { line, key, value, expr, body } => {
             let expr = nameres_expr(
                 *expr,
                 ns_path,
@@ -286,12 +286,12 @@ fn nameres_expr(e: Expr, ns_path: &str, env: &mut LocalEnv) -> Fallible<Value> {
                 err(line, "For-loop variables have identical names".into())?
             };
             let body = nameres_exprs(body, ns_path, inner)?;
-            Ok(Value::For { line, key, value, expr: Box::new(expr), body })
+            Ok(Expr::For { line, key, value, expr: Box::new(expr), body })
         }
     }
 }
 
-fn nameres_exprs(exprs: Vec<Expr>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Value>> {
+fn nameres_exprs(exprs: Vec<Tree>, module_path: &str, mut env: LocalEnv) -> Fallible<Vec<Expr>> {
     let mut result = vec![];
     for expr in exprs {
         result.push(nameres_expr(expr, module_path, &mut env)?);
@@ -299,7 +299,7 @@ fn nameres_exprs(exprs: Vec<Expr>, module_path: &str, mut env: LocalEnv) -> Fall
     Ok(result)
 }
 
-pub fn name_resolution(main: String, modules: HashMap<String, Vec<Decl>>) -> Fallible<(String, HashMap<String, Value>)> {
+pub fn name_resolution(main: String, modules: HashMap<String, Vec<Decl>>) -> Fallible<(String, HashMap<String, Expr>)> {
     let mut global_env = GlobalEnv::new(&modules)?;
     let mut result = HashMap::new();
     let mut main_name = None;
@@ -332,32 +332,32 @@ mod nameres_tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn int(value: i64) -> Expr {
-        Expr::Int { line: 1, value }
+    fn int(value: i64) -> Tree {
+        Tree::Int { line: 1, value }
     }
 
-    fn real() -> Expr {
-        Expr::Real { line: 1, value: 4.5 }
+    fn real() -> Tree {
+        Tree::Real { line: 1, value: 4.5 }
     }
 
-    fn text() -> Expr {
-        Expr::Text { line: 1, value: "zyba".to_string() }
+    fn text() -> Tree {
+        Tree::Text { line: 1, value: "zyba".to_string() }
     }
 
-    fn bool() -> Expr {
-        Expr::Bool { line: 1, value: true }
+    fn bool() -> Tree {
+        Tree::Bool { line: 1, value: true }
     }
 
-    fn var(name: &str) -> Expr {
-        Expr::Var { line: 1, ns: None, name: name.to_string() }
+    fn var(name: &str) -> Tree {
+        Tree::Var { line: 1, ns: None, name: name.to_string() }
     }
 
-    fn var_ns(ns: &str, name: &str) -> Expr {
-        Expr::Var { line: 1, ns: Some(ns.to_string()), name: name.to_string() }
+    fn var_ns(ns: &str, name: &str) -> Tree {
+        Tree::Var { line: 1, ns: Some(ns.to_string()), name: name.to_string() }
     }
 
-    fn record() -> Expr {
-        Expr::Record {
+    fn record() -> Tree {
+        Tree::Record {
             line: 1,
             fields: HashMap::from_iter([
                 ("b".to_string(), bool()),
@@ -366,24 +366,24 @@ mod nameres_tests {
         }
     }
 
-    fn access(name: &str, field: &str) -> Expr {
-        Expr::Access {
+    fn access(name: &str, field: &str) -> Tree {
+        Tree::Access {
             line: 1,
             object: Box::new(var(name)),
             field: field.to_string(),
         }
     }
 
-    fn call(func: &str, args: Expr) -> Expr {
-        Expr::Call {
+    fn call(func: &str, args: Tree) -> Tree {
+        Tree::Call {
             line: 1,
             func: Box::new(var(func)),
             args: vec![args],
         }
     }
 
-    fn binop() -> Expr {
-        Expr::BinOp {
+    fn binop() -> Tree {
+        Tree::BinOp {
             line: 1,
             name: "+".to_string(),
             lhs: Box::new(int(1)),
@@ -391,7 +391,7 @@ mod nameres_tests {
         }
     }
 
-    fn const_decl(name: &str, expr: Expr, private: bool) -> Decl {
+    fn const_decl(name: &str, expr: Tree, private: bool) -> Decl {
         Decl::Const { line: 1, name: name.to_string(), expr, private }
     }
 
@@ -408,7 +408,7 @@ mod nameres_tests {
 
     #[test]
     fn test_simple_const() {
-        use Value::*;
+        use Expr::*;
 
         let mut modules = HashMap::new();
         modules.insert(
@@ -472,13 +472,13 @@ mod nameres_tests {
 
     #[test]
     fn test_if() {
-        use Value::*;
+        use Expr::*;
 
         let mut modules = HashMap::new();
         modules.insert(
             "main.zyba".to_string(),
             vec![
-                const_decl("main", Expr::If {
+                const_decl("main", Tree::If {
                     line: 1,
                     cond: Box::new(bool()),
                     then: vec![int(321)],
@@ -501,13 +501,13 @@ mod nameres_tests {
 
     #[test]
     fn test_while() {
-        use Value::*;
+        use Expr::*;
 
         let mut modules = HashMap::new();
         modules.insert(
             "main.zyba".to_string(),
             vec![
-                const_decl("main", Expr::While {
+                const_decl("main", Tree::While {
                     line: 1,
                     cond: Box::new(bool()),
                     body: vec![int(777)],
@@ -528,20 +528,20 @@ mod nameres_tests {
 
     #[test]
     fn test_for() {
-        use Value::*;
+        use Expr::*;
 
         let mut modules = HashMap::new();
         modules.insert(
             "main.zyba".to_string(),
             vec![
-                const_decl("main", Expr::For {
+                const_decl("main", Tree::For {
                     line: 1,
                     key: None,
                     value: "item".to_string(),
                     expr: Box::new(int(20)),
                     body: vec![var("item")],
                 }, false),
-                const_decl("foo", Expr::For {
+                const_decl("foo", Tree::For {
                     line: 1,
                     key: Some("key".to_string()),
                     value: "value".to_string(),
@@ -574,7 +574,7 @@ mod nameres_tests {
 
         let modules = HashMap::from_iter([
             ("main.zyba".to_string(), vec![
-                const_decl("main", Expr::For {
+                const_decl("main", Tree::For {
                     line: 1,
                     key: Some("item".to_string()),
                     value: "item".to_string(),
@@ -588,7 +588,7 @@ mod nameres_tests {
 
     #[test]
     fn test_import() {
-        use Value::*;
+        use Expr::*;
 
         let mut modules = HashMap::new();
         modules.insert("main.zyba".into(), vec![
@@ -613,10 +613,10 @@ mod nameres_tests {
     #[test]
     fn test_shadowing_assignment_and_reuse() {
         let body = vec![
-            Expr::Assign { line: 1, name: "x".into(), expr: Box::new(int(1)) },
-            Expr::Assign { line: 1, name: "x".into(), expr: Box::new(int(2)) },
+            Tree::Assign { line: 1, name: "x".into(), expr: Box::new(int(1)) },
+            Tree::Assign { line: 1, name: "x".into(), expr: Box::new(int(2)) },
         ];
-        let main = vec![const_decl("main", Expr::Lambda {
+        let main = vec![const_decl("main", Tree::Lambda {
             line: 1,
             args: vec![],
             ret: Box::new(int(0)),
@@ -629,9 +629,9 @@ mod nameres_tests {
         let (_, table) = name_resolution("main.zyba".into(), modules).unwrap();
         // just ensure it succeeds: first Assign => Init, second => Assign
         match table.values().next().unwrap() {
-            Value::Lambda { body, .. } => {
-                assert!(matches!(body[0], Value::Init { .. }));
-                assert!(matches!(body[1], Value::Assign { .. }));
+            Expr::Lambda { body, .. } => {
+                assert!(matches!(body[0], Expr::Init { .. }));
+                assert!(matches!(body[1], Expr::Assign { .. }));
             }
             v => panic!("unexpected {:?}", v),
         }
@@ -695,12 +695,12 @@ mod nameres_tests {
     fn test_reassign_const_is_error() {
         let modules = HashMap::from_iter([
             ("main.zyba".to_string(), vec![
-                const_decl("main", Expr::Lambda {
+                const_decl("main", Tree::Lambda {
                     line: 1,
                     args: vec![],
                     ret: Box::new(var("Int")),
                     body: vec![
-                        Expr::Assign {
+                        Tree::Assign {
                             line: 1,
                             name: "main".to_string(),
                             expr: Box::new(int(1))
@@ -721,7 +721,7 @@ mod nameres_tests {
     #[test]
     fn test_duplicate_argument_is_error() {
         let modules = HashMap::from_iter([("main.zyba".to_string(), vec![
-            const_decl("main", Expr::Lambda {
+            const_decl("main", Tree::Lambda {
                 line: 1,
                 args: vec![
                     ("x".to_string(), var("Int")),
