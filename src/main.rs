@@ -9,7 +9,7 @@ mod nameres;
 mod builtin;
 mod typecheck;
 
-mod highlevel_ir;
+mod midend;
 
 fn main() {
     let mut files = HashMap::new();
@@ -129,5 +129,5 @@ fn main() {
     };
     println!("Ok");
 
-    highlevel_ir::codegen(&main_fn, decls);
+    midend::generate(&main_fn, decls);
 }
