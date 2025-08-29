@@ -1,6 +1,7 @@
-use std::{collections::HashMap, ops::Index};
+use std::collections::HashMap;
 
-use crate::{builtin, typecheck::Value};
+use crate::builtin;
+use crate::typecheck::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {

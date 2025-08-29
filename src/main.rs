@@ -123,8 +123,11 @@ fn main() {
         println!("Value: {:?}", value);
     }
 
-    match typecheck::check(decls) {
-        Ok(_) => println!("Ok"),
-        Err(e) => println!("Error: {:?}", e)
+    let decls = match typecheck::check(decls) {
+        Ok(decls) => decls,
+        Err(e) => panic!("Error: {:?}", e)
     };
+    println!("Ok");
+
+    highlevel_ir::codegen(&main_fn, decls);
 }
