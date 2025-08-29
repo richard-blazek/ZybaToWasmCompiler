@@ -427,6 +427,18 @@ fn gen_while(cond: Value, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i
     (code, locals)
 }
 
+fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    todo!()
+}
+
+fn gen_for(key: String, value: String, expr: Value, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    todo!()
+}
+
+fn gen_builtin(op: String, args: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    todo!()
+}
+
 fn gen_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     use Value::*;
 
@@ -443,15 +455,9 @@ fn gen_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
         Access { object, field, .. } => gen_access(*object, field, env),
         If { cond, then, elsë, .. } => gen_if(*cond, then, elsë, env),
         While { cond, body, .. } => gen_while(*cond, body, env),
-        Lambda { args, ret, body, tpe } => {
-            todo!()
-        }
-        For { key, value, expr, body, tpe } => {
-            todo!()
-        }
-        Builtin { op, args, tpe } => {
-            todo!()
-        }
+        Lambda { args, ret, body, .. } => gen_lambda(args, ret, body, env),
+        For { key, value, expr, body, .. } => gen_for(key, value, *expr, body, env),
+        Builtin { op, args, .. } => gen_builtin(op, args, env)
     }
 }
 
