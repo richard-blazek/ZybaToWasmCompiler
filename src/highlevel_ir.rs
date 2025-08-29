@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::builtin;
 use crate::typecheck::Value;
@@ -427,7 +427,97 @@ fn gen_while(cond: Value, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i
     (code, locals)
 }
 
+fn collect_vars<'a, T: IntoIterator<Item=&'a Value>>(body: T) -> (HashSet<String>, HashSet<String>) {
+    let mut used = HashSet::new();
+    let mut defined = HashSet::new();
+    for value in body {
+        match value {
+            Value::Record { fields, .. } => {
+                let (new_used, new_defined) = collect_vars(fields.values());
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::Var { name, .. } => {
+                used.insert(name.clone());
+            }
+            Value::Call { func, args, .. } => {
+                let (new_used, new_defined) = collect_vars(
+                    args.iter().chain([&**func])
+                );
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::Builtin { args, .. } => {
+                let (new_used, new_defined) = collect_vars(args);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::Access { object, .. } => {
+                let (new_used, new_defined) = collect_vars([&**object]);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::Lambda { args, body, .. } => {
+                defined.extend(args.iter().map(|(n, _)| n.clone()));
+
+                let (new_used, new_defined) = collect_vars(body);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::Init { name, value, .. } => {
+                defined.insert(name.clone());
+
+                let (new_used, new_defined) = collect_vars([&**value]);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::Assign { value, .. } => {
+                let (new_used, new_defined) = collect_vars([&**value]);
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::If { cond, then, elsë, .. } => {
+                let (new_used, new_defined) = collect_vars(
+                    then.iter().chain(elsë).chain([&**cond])
+                );
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::While { cond, body, .. } => {
+                let (new_used, new_defined) = collect_vars(
+                    body.iter().chain([&**cond])
+                );
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            Value::For { key, value, expr, body, tpe } => {
+                defined.insert(key.clone());
+                defined.insert(value.clone());
+
+                let (new_used, new_defined) = collect_vars(
+                    body.iter().chain([&**expr])
+                );
+                used.extend(new_used);
+                defined.extend(new_defined);
+            }
+            _ => {}
+        }
+    }
+    (used, defined)
+}
+
+fn collect_captures(body: &Vec<Value>, args: HashSet<String>, env: &mut Env) -> Vec<String> {
+    let (mut used, defined) = collect_vars(body);
+    used.retain(|x| {
+        !defined.contains(x) && !args.contains(x) && !env.is_global(x)
+    });
+    Vec::from_iter(used)
+}
+
 fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
+    let args_set = args.iter().map(|(n, _)| n.clone()).collect();
+    let captures = collect_captures(&body, args_set, env);
+    
     todo!()
 }
 
