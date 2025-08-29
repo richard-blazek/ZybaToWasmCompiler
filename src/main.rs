@@ -129,5 +129,5 @@ fn main() {
     };
     println!("Ok");
 
-    midend::generate(&main_fn, decls);
+    midend::codegen(&main_fn, decls);
 }

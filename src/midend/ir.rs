@@ -1,3 +1,5 @@
+use crate::builtin;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
@@ -7,6 +9,42 @@ pub enum Type {
     Array(Box<Type>),
     Func(Vec<Type>, Box<Type>),
     Tuple(Vec<Type>)
+}
+
+impl Type {
+    pub fn from(t: &builtin::Type) -> Type {
+        use crate::midend::utils::sorted;
+
+        match t {
+            builtin::Type::Int => Type::Int,
+            builtin::Type::Real => Type::Real,
+            builtin::Type::Text => Type::Text,
+            builtin::Type::Bool => Type::Bool,
+            builtin::Type::List { item } => Type::Tuple(vec![
+                Type::Array(Box::new(Type::from(&**item))),
+                Type::Int
+            ]),
+            builtin::Type::Dict { key, value } => Type::Tuple(vec![
+                Type::Array(Box::new(Type::Tuple(vec![
+                    Type::from(&**key),
+                    Type::from(&**value),
+                    Type::Bool
+                ]))),
+                Type::Int
+            ]),
+            builtin::Type::Func { args, ret } => Type::Func(
+                args.into_iter().map(Type::from).collect(),
+                Box::new(Type::from(&**ret))
+            ),
+            builtin::Type::Record { fields } => {
+                let vec: Vec<_> = sorted(fields, |(n, _)| n);
+
+                Type::Tuple(vec.into_iter().map(|(_, t)| {
+                    Type::from(t)
+                }).collect())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,15 +66,15 @@ pub enum Instr {
     Drop { tpe: Type },
 
     // defines a label
-    Label { id: i64 },
+    Label { id: usize },
 
     // jump to the label with the given id
-    JumpAlways { id: i64 },
+    JumpAlways { id: usize },
 
     // stack before: [any, bool]
     // stack after:  [any]
     // if bool == false, jump to the label with the given id
-    JumpUnless { id: i64 },
+    JumpUnless { id: usize },
 
     // stack before: [any, fields[0], .., fields[N-1]]
     // stack after:  [any, { fields[0], .., fields[N-1] }]
@@ -49,20 +87,20 @@ pub enum Instr {
     // stack before: [any, value of type=tpe]
     // stack after: [any]
     // new local with id=id and the given value created
-    InitLocal { id: i64, tpe: Type },
+    InitLocal { id: usize, tpe: Type },
 
     // the local with type=tpe, id=id dropped
-    DropLocal { id: i64, tpe: Type },
+    DropLocal { id: usize, tpe: Type },
 
     // the local with type=tpe, id=id and a value=value
     // stack before: [any]
     // stack after: [any, value]
-    GetLocal { id: i64, tpe: Type },
+    GetLocal { id: usize, tpe: Type },
 
     // stack before: [any, value]
     // stack after: [any]
     // the local with type=tpe, id=id will be set to the given value
-    SetLocal { id: i64, tpe: Type },
+    SetLocal { id: usize, tpe: Type },
 
     // stack before: [any, a1 of type=args[0], .., aN of type=args[N-1]]
     // stack after:  [any, result of type=ret]
@@ -71,7 +109,7 @@ pub enum Instr {
     // global function fn with id=id (different from local variable id)
     // stack before: [any, c1 of type=capture[0], .., cN of type=capture[N-1]]
     // stack after:  [any, fn stored including the captured parameters]
-    BindFunc { id: i64, args: Vec<Type>, ret: Type, capture: Vec<Type> },
+    BindFunc { id: usize, args: Vec<Type>, ret: Type, capture: Vec<Type> },
 
     // stack before: [any, value1]
     // stack after:  [any, value2]
