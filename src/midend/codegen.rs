@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtin;
+use crate::builtin::{self, void};
 use crate::midend::{globals::Globals, locals::Locals};
 use crate::typecheck::Value;
 use crate::midend::ir::*;
@@ -184,14 +184,28 @@ fn gen_if(cond: Value, then: Value, elsë: Value, tpe: builtin::Type, g: &mut Gl
     let if_not = g.new_label();
     let end_if = g.new_label();
 
+    let (then_t, elsë_t) = (then.tpe(), elsë.tpe());
+    let drop = tpe == void() && (then_t != void() || elsë_t != void());
+
     let mut code = gen_value(cond, g, l);
     code.push(Instr::JumpUnless { id: if_not });
     code.extend(gen_value(then, g, l));
+
+    if drop {
+        code.push(Instr::Drop { tpe: Type::from(&then_t) });
+    }
     code.push(Instr::JumpAlways { id: end_if });
     code.push(Instr::Label { id: if_not });
     code.extend(gen_value(elsë, g, l));
+
+    if drop {
+        code.push(Instr::Drop { tpe: Type::from(&elsë_t) });
+    }
     code.push(Instr::Label { id: end_if });
 
+    if drop {
+        code.push(Instr::NewTuple { fields: vec![] });
+    }
     code
 }
 
@@ -199,14 +213,17 @@ fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<I
     let leave = g.new_label();
     let start = g.new_label();
 
+    let body_t = body.tpe();
+
     let mut code = vec![Instr::Label { id: start }];
     code.extend(gen_value(cond, g, l));
 
     code.push(Instr::JumpUnless { id: leave });
     code.extend(gen_value(body, g, l));
+    code.push(Instr::Drop { tpe: Type::from(&body_t) });
     code.push(Instr::JumpAlways { id: start });;
     code.push(Instr::Label { id: leave });
-
+    code.push(Instr::NewTuple { fields: vec![] });
     code
 }
 
@@ -236,7 +253,13 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Valu
         code.push(Instr::SetLocal { id, tpe })
     }
 
+    let body_t = body.tpe();
     code.extend(gen_value(body, g, &mut inner));
+
+    if ret == void() && body_t != void() {
+        code.push(Instr::Drop { tpe: Type::from(&body_t) });
+        code.push(Instr::NewTuple { fields: vec![] });
+    }
 
     vec![Instr::BindFunc {
         id: g.add_lambda(Func::new(code, inner.get_all())),
