@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Index};
 
 use crate::{builtin, typecheck::Value};
 
@@ -206,6 +206,8 @@ struct Env {
     global_fetch: HashMap<String, Instr>,
     global_name_to_id: HashMap<String, i64>,
     global_counter: i64,
+
+    label_counter: i64
 }
 
 impl Env {
@@ -256,6 +258,7 @@ impl Env {
             funcs,
             global_name_to_id: id_map,
             global_counter: counter,
+            label_counter: 0
         }
     }
 
@@ -303,6 +306,11 @@ impl Env {
         self.funcs[self.global_counter as usize - 1] = func;
         self.global_counter += 1;
         self.global_counter - 1
+    }
+
+    fn new_label(&mut self) -> i64 {
+        self.label_counter += 1;
+        self.label_counter - 1
     }
 }
 
@@ -361,16 +369,50 @@ fn code_value(value: Value, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
             code.push(Instr::CallFunc { args: arg_types, ret: ret_type });
             (code, locals)
         }
-        Access { object, field, tpe } => {
-            todo!()
+        Access { object, field, .. } => {
+            let fields = sorted(match object.tpe() {
+                builtin::Type::Record { fields } => fields,
+                _ => unreachable!(),
+            }, |(n, _)| n);
+
+            let i = fields.iter().position(|(n, _)| n == &field).unwrap();
+            let types = fields.into_iter().map(|(_, v)| conv_type(v)).collect();
+
+            let (mut code, locals) = code_value(*object, env);
+            code.push(Instr::GetField { fields: types, i });
+            (code, locals)
+        }
+        If { cond, then, elsë, .. } => {
+            let if_not = env.new_label();
+            let end_if = env.new_label();
+
+            let (mut code, locals) = code_value(*cond, env);
+            code.push(Instr::JumpUnless { id: if_not });
+            code.extend(code_block(then, env));
+            code.push(Instr::JumpAlways { id: end_if });
+            code.push(Instr::Label { id: if_not });
+            code.extend(code_block(elsë, env));
+            code.push(Instr::Label { id: end_if });
+
+            (code, locals)
+        }
+        While { cond, body, .. } => {
+            let leave = env.new_label();
+            let start = env.new_label();
+
+            let mut code = vec![];
+            let (cond_code, locals) = code_value(*cond, env);
+
+            code.push(Instr::Label { id: start });
+            code.extend(cond_code);
+            code.push(Instr::JumpUnless { id: leave });
+            code.extend(code_block(body, env));
+            code.push(Instr::JumpAlways { id: start });;
+            code.push(Instr::Label { id: leave });
+
+            (code, locals)
         }
         Lambda { args, ret, body, tpe } => {
-            todo!()
-        }
-        If { cond, then, elsë, tpe } => {
-            todo!()
-        }
-        While { cond, body, tpe } => {
             todo!()
         }
         For { key, value, expr, body, tpe } => {
