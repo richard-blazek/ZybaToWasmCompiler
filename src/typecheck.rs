@@ -189,11 +189,8 @@ fn check_for(line: i64, key: String, value: String, expr: Expr, body: Vec<Expr>,
     if let Type::List { item } = expr.tpe() {
         env.insert(key.clone(), Type::Int);
         env.insert(value.clone(), *item);
-    } else if let Type::Dict { key: kt, value: vt } = expr.tpe() {
-        env.insert(key.clone(), *kt);
-        env.insert(value.clone(), *vt);
     } else {
-        err(line, "Expected a List or Dict in the for loop".into())?;
+        err(line, "Expected a List in the for loop".into())?;
     }
     let body = Box::new(check_block(body, env)?);
     Ok(Value::For { key, value, expr, body, tpe: void() })
@@ -480,7 +477,6 @@ mod tests {
             (call("text", vec![bool(true)]), Type::Text),
             (call("bool", vec![int(0)]), Type::Bool),
             (call("list", vec![var("Int"), int(1), int(2)]), Type::List { item: Box::new(Type::Int) }),
-            (call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), Type::Dict { key: Box::new(Type::Text), value: Box::new(Type::Int) }),
             (call("not", vec![bool(true)]), Type::Bool),
             (call("print", vec![text("a")]), void()),
             (call("len", vec![call("list", vec![var("Int")])]), Type::Int),

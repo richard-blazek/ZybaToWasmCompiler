@@ -24,14 +24,6 @@ impl Type {
                 Type::Array(Box::new(Type::from(&**item))),
                 Type::Int
             ]),
-            builtin::Type::Dict { key, value } => Type::Tuple(vec![
-                Type::Array(Box::new(Type::Tuple(vec![
-                    Type::from(&**key),
-                    Type::from(&**value),
-                    Type::Bool
-                ]))),
-                Type::Int
-            ]),
             builtin::Type::Func { args, ret } => Type::Func(
                 args.into_iter().map(Type::from).collect(),
                 Box::new(Type::from(&**ret))

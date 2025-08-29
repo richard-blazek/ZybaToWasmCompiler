@@ -8,7 +8,6 @@ pub enum Type {
     Text,
     Bool,
     List { item: Box<Type> },
-    Dict { key: Box<Type>, value: Box<Type> },
     Func { args: Vec<Type>, ret: Box<Type> },
     Record { fields: HashMap<String, Type> },
 }
@@ -23,13 +22,6 @@ impl std::fmt::Display for Type {
             Type::List { item } => {
                 f.write_str("List[")?;
                 item.fmt(f)?;
-                f.write_str("]")
-            }
-            Type::Dict { key, value } => {
-                f.write_str("Dict[")?;
-                key.fmt(f)?;
-                f.write_str(", ")?;
-                value.fmt(f)?;
                 f.write_str("]")
             }
             Type::Func { args, ret } => {
@@ -67,23 +59,10 @@ pub fn get_scalar_type(name: &str) -> Option<Type> {
     }
 }
 
-fn is_key_t(t: &Type) -> bool {
-    use Type::*;
-    match t {
-        Int | Text | Bool => true,
-        Real | List { .. } | Dict { .. } | Func { .. } => false,
-        Record { .. } => false
-    }
-}
-
 pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
     match (name, args) {
         ("List", [item]) => Some(Type::List {
             item: Box::new(item.clone())
-        }),
-        ("Dict", [key, value]) if is_key_t(key) => Some(Type::Dict {
-            key: Box::new(key.clone()),
-            value: Box::new(value.clone())
         }),
         ("Func", [.., last]) => Some(Type::Func {
             args: Vec::from(&args[0..args.len() - 1]),
@@ -95,8 +74,8 @@ pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
 
 static BUILTIN_NAMES : LazyLock<HashSet<&str>> = LazyLock::new(|| {
     HashSet::from([
-        "Int", "Real", "Text", "Bool", "List", "Dict", "Func",
-        "int", "real", "text", "bool", "list", "dict",
+        "Int", "Real", "Text", "Bool", "List", "Func",
+        "int", "real", "text", "bool", "list",
         "not", "print", "len", "has", "get", "set", "del", "insert"
     ])
 });
@@ -124,25 +103,12 @@ pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> O
                 None
             }
         }
-        ("dict", [key, value], _) if is_key_t(key) => {
-            let k_v = [key.clone(), value.clone()];
-            if arg_types.chunks(2).all(|pair| pair == k_v) {
-                Some(Dict {
-                    key: Box::new(key.clone()),
-                    value: Box::new(value.clone())
-                })
-            } else {
-                None
-            }
-        }
         ("not", [], [Int]) => Some(Int),
         ("not", [], [Bool]) => Some(Bool),
         ("print", [], [Text]) => Some(void()),
-        ("len", [], [Text | List { .. } | Dict { .. }]) => Some(Int),
-        ("has", [], [Dict { key, .. }, k]) if **key == *k => Some(Bool),
+        ("len", [], [Text | List { .. }]) => Some(Int),
         ("get", [], [List { item }, Int]) => Some(*item.clone()),
         ("get", [], [Text, Int]) => Some(Int),
-        ("get", [], [Dict { key, value }, k]) if **key == *k => Some(*value.clone()),
         ("set", [], [List { item }, Int, new_item]) => {
             if **item == *new_item {
                 Some(void())
@@ -150,22 +116,8 @@ pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> O
                 None
             }
         }
-        ("set", [], [Dict { key, value }, k, v]) => {
-            if **key == *k && **value == *v {
-                Some(void())
-            } else {
-                None
-            }
-        }
         ("del", [], [List { item }, Int, new_item]) => {
             if **item == *new_item {
-                Some(void())
-            } else {
-                None
-            }
-        }
-        ("del", [], [Dict { key, value }, k, v]) => {
-            if **key == *k && **value == *v {
                 Some(void())
             } else {
                 None
