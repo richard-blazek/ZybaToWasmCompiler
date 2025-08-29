@@ -270,6 +270,10 @@ impl Env {
         self.local_counter - 1
     }
 
+    fn overwrite_local(&mut self, name: String, id: i64) {
+        self.local_name_to_id.insert(name, id);
+    }
+
     fn local_type_by_id(&self, id: i64) -> Type {
         self.local_id_to_type[&id].clone()
     }
@@ -517,8 +521,43 @@ fn collect_captures(body: &Vec<Value>, args: HashSet<String>, env: &mut Env) -> 
 fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
     let args_set = args.iter().map(|(n, _)| n.clone()).collect();
     let captures = collect_captures(&body, args_set, env);
-    
-    todo!()
+
+    let outer_ids: Vec<_> = captures.iter().map(|capture| {
+        (capture.clone(), env.global_id_by_name(capture))
+    }).collect();
+
+    let capture_types: Vec<_> = captures.iter().map(|capture| {
+        env.local_type_by_name(capture)
+    }).collect();
+
+    let mut code: Vec<Instr> = vec![];
+    for capture in captures {
+        let tpe = env.local_type_by_name(&capture);
+        let id = env.new_local(capture, tpe);
+        code.push(Instr::InitLocal { id, tpe: env.local_type_by_id(id) });
+    }
+
+    let arg_types = args.iter().map(|(_, t)| conv_type(t.clone())).collect();
+
+    for (arg_name, arg_tpe) in args {
+        let tpe = conv_type(arg_tpe);
+        let id = env.new_local(arg_name, tpe.clone());
+        code.push(Instr::InitLocal { id, tpe })
+    }
+
+    code.extend(gen_block(body, env));
+
+    for (name, outer_id) in outer_ids {
+        env.overwrite_local(name, outer_id);
+    }
+
+    let lambda_id = env.add_lambda(Func { code });
+    (vec![Instr::BindFunc {
+        id: lambda_id,
+        args: arg_types,
+        ret: conv_type(ret),
+        capture: capture_types
+    }], vec![])
 }
 
 fn gen_for(key: String, value: String, expr: Value, body: Vec<Value>, env: &mut Env) -> (Vec<Instr>, Vec<i64>) {
