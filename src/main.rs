@@ -40,7 +40,7 @@ fn main() {
             prime = false;
         } else {
             i = 2;
-            while i * i <= n & prime {
+            while i * i <= n && prime {
                 prime = n % i != 0;
                 i = i + 1;
             }
@@ -48,7 +48,7 @@ fn main() {
         prime
     };
 
-    sum = fun[n: List[Int]] Int {
+    sum = fun[n: Array[Int]] Int {
         total = 0;
         for index, value : n {
             total = total + value;
@@ -56,32 +56,11 @@ fn main() {
         total
     };
 
-    range = fun[n: Int] List[Int] {
-        result = list[Int];
+    range = fun[n: Int] Array[Int] {
+        result = array[Int, n];
         i = 0;
         while i < n {
-#            insert[result, len[result], i + 1];
-            i = i + 1;
-        }
-        result
-    };
-
-    private concat = fun[LoL: List[List[Int]]] List[Int] {
-        result = list[Int];
-        for lst : LoL {
-            for item : lst {
-#                insert[result, len[result], item];
-            }
-        }
-        result
-    };
-
-    merge = fun[a: List[Int], b: List[Int]] List[Int] {
-        result = list[Int];
-        i = 0;
-        while (i < len[a]) & (i < len[b]) {
-#            insert[result, len[result], get[a, i]];
-#            insert[result, len[result], get[b, i]];
+            set[result, i, i + 1];
             i = i + 1;
         }
         result
@@ -90,8 +69,7 @@ fn main() {
     main = fun[] () {
         nums_to_120 = range[math::factorial[5]];
         for i, num : nums_to_120 {
-#            print[text[i]];
-#            print[text[num]];
+            print[chr[65 + (i % 26)]];
         }
     };".to_string());
 

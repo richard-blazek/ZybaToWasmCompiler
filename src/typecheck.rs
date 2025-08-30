@@ -185,11 +185,11 @@ fn check_while(cond: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> 
 
 fn check_for(line: i64, key: String, value: String, expr: Expr, body: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let expr = Box::new(check_value(expr, env)?);
-    if let Type::List { item } = expr.tpe() {
+    if let Type::Array { item } = expr.tpe() {
         env.insert(key.clone(), Type::Int);
         env.insert(value.clone(), *item);
     } else {
-        err(line, "Expected a List in the for loop".into())?;
+        err(line, "Expected a Array in the for loop".into())?;
     }
     let body = Box::new(check_block(body, env)?);
     Ok(Value::For { key, value, expr, body, tpe: void() })
@@ -474,13 +474,13 @@ mod tests {
             (call("int", vec![real(1.0)]), Type::Int),
             (call("real", vec![int(1)]), Type::Real),
             (call("bool", vec![int(0)]), Type::Bool),
-            (call("list", vec![var("Int"), int(1), int(2)]), Type::List { item: Box::new(Type::Int) }),
+            (call("array", vec![var("Int"), int(1), int(2)]), Type::Array { item: Box::new(Type::Int) }),
             (call("not", vec![bool(true)]), Type::Bool),
             (call("print", vec![text("a")]), void()),
-            (call("len", vec![call("list", vec![var("Int")])]), Type::Int),
-            (call("get", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Int),
-            (call("set", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
-            (call("insert", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
+            (call("len", vec![call("array", vec![var("Int")])]), Type::Int),
+            (call("get", vec![call("array", vec![var("Int"), int(1)]), int(0)]), Type::Int),
+            (call("set", vec![call("array", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
+            (call("insert", vec![call("array", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
         ];
 
         for (c, tpe) in calls {
@@ -521,9 +521,9 @@ mod tests {
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(while_loop(bool(true), vec![int(1)])))]);
         assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
 
-        // For loop over list
-        let list = call("list", vec![var("Int"), int(1)]);
-        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", list, vec![var("v")])))]);
+        // For loop over array
+        let array = call("array", vec![var("Int"), int(1)]);
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", array, vec![var("v")])))]);
         assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
     }
 
@@ -550,11 +550,11 @@ mod tests {
         // Invalid generic type
         check(HashMap::from([("a".to_string(), lambda(vec![], call("Foo", vec![var("Int")]), vec![]))])).expect_err("Invalid generic type");
         
-        // Returns (), but expects List[List[Int]]
-        check(HashMap::from([("a".to_string(), lambda(vec![], call("List", vec![call("List", vec![var("Int")])]), vec![]))])).expect_err("Missing return");
+        // Returns (), but expects Array[Array[Int]]
+        check(HashMap::from([("a".to_string(), lambda(vec![], call("Array", vec![call("Array", vec![var("Int")])]), vec![]))])).expect_err("Missing return");
         
         // Repeated brackets in type
-        check(HashMap::from([("a".to_string(), lambda(vec![], Expr::Call { line: 1, func: Box::new(call("List", vec![var("Int")])), args: vec![] }, vec![]))])).expect_err("Repeated brackets");
+        check(HashMap::from([("a".to_string(), lambda(vec![], Expr::Call { line: 1, func: Box::new(call("Array", vec![var("Int")])), args: vec![] }, vec![]))])).expect_err("Repeated brackets");
 
         // Invalid type expression
         check(HashMap::from([("a".to_string(), lambda(vec![], int(1), vec![]))])).expect_err("Invalid type expression");
@@ -595,7 +595,7 @@ mod tests {
         check(globals).expect_err("Calling non-function");
 
         // Invalid builtin call
-        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(call("list", vec![var("Int"), bool(true)])))]);
+        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(call("array", vec![var("Int"), bool(true)])))]);
         check(globals).expect_err("Invalid builtin call");
 
         // Invalid binary operation

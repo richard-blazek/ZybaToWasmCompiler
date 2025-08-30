@@ -20,10 +20,9 @@ impl Type {
             builtin::Type::Real => Type::Real,
             builtin::Type::Text => Type::Text,
             builtin::Type::Bool => Type::Bool,
-            builtin::Type::List { item } => Type::Tuple(vec![
-                Type::Array(Box::new(Type::from(&**item))),
-                Type::Int
-            ]),
+            builtin::Type::Array { item } => Type::Array(
+                Box::new(Type::from(&**item))
+            ),
             builtin::Type::Func { args, ret } => Type::Func(
                 args.into_iter().map(Type::from).collect(),
                 Box::new(Type::from(&**ret))
@@ -35,6 +34,13 @@ impl Type {
                     Type::from(t)
                 }).collect())
             }
+        }
+    }
+
+    pub fn array_item(&self) -> Type {
+        match self {
+            Type::Array(item) => *item.clone(),
+            _ => unreachable!()
         }
     }
 }
@@ -98,6 +104,7 @@ pub enum Instr {
     // stack after:  [any, value2]
     RealToInt,
     IntToReal,
+    IntToTextAscii,
     NotInt,
     NotBool,
 
@@ -157,6 +164,8 @@ pub enum Instr {
     OrBool,
     XorInt,
     XorBool,
+
+    Abort
 }
 
 #[derive(Debug, Clone, PartialEq)]

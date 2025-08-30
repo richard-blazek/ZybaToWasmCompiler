@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtin::{self, apply_builtin_fn, void};
+use crate::builtin::{self, void};
 use crate::midend::{globals::Globals, locals::Locals};
 use crate::typecheck::Value;
 use crate::midend::ir::*;
@@ -232,39 +232,37 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
     let leave = g.new_label();
     let start = g.new_label();
 
-    let val_t = match expr.tpe() {
-        builtin::Type::List { item } => Type::from(&*item),
-        _ => unreachable!()
-    };
-    let expr_t = Type::Tuple(vec![
-        Type::Array(Box::new(val_t.clone())),
-        Type::Int
-    ]);
+    let arr_t = Type::from(&expr.tpe());
+    let val_t = arr_t.array_item();
 
     let key_id = l.define(key, Type::Int);
     let val_id = l.define(value, val_t.clone());
-    let expr_id = l.alloc(expr_t.clone());
+    let expr_id = l.alloc(arr_t.clone());
 
     // Init
     let mut code = gen_value(expr, g, l);
-    code.push(Instr::SetLocal { id: expr_id, tpe: expr_t.clone() });
+    code.push(Instr::SetLocal { id: expr_id, tpe: arr_t.clone() });
     code.push(Instr::PushInt { value: 0 });
     code.push(Instr::SetLocal { id: key_id, tpe: Type::Int });
 
     // Cond
     code.push(Instr::Label { id: start });
     code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
-    code.push(Instr::GetLocal { id: expr_id, tpe: expr_t.clone() });
-    code.push(Instr::GetField { fields: vec![
-        Type::Array(Box::new(val_t.clone())),
-        Type::Int
-    ], i: 1 });
+    code.push(Instr::GetLocal { id: expr_id, tpe: arr_t.clone() });
+    code.push(Instr::LenArray { item: val_t.clone() });
     code.push(Instr::LtInt);
     code.push(Instr::JumpUnless { id: leave });
 
-    // Block
+    // Get array[i]
+    code.push(Instr::GetLocal { id: expr_id, tpe: arr_t.clone() });
+    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
+    code.push(Instr::GetArray { item: val_t.clone() });
     code.push(Instr::SetLocal { id: val_id, tpe: val_t.clone() });
+
+    // Block
     code.extend(gen_value(body, g, l));
+
+    // Increment
     code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
     code.push(Instr::PushInt { value: 1 });
     code.push(Instr::AddInt);
@@ -425,6 +423,24 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: builtin::Type, g: &mut Globals
         ("^" | "!=", [Bool, Bool]) => {
             gen_binary_op(Instr::XorBool, args, g, l)
         }
+        ("&&", [Bool, Bool]) => {
+            let (lhs, rhs) = first2(args);
+            gen_value(Value::If {
+                cond: Box::new(lhs),
+                then: Box::new(rhs),
+                elsë: Box::new(Value::Bool { value: false, tpe: Bool }),
+                tpe: Bool
+            }, g, l)
+        }
+        ("||", [Bool, Bool]) => {
+            let (lhs, rhs) = first2(args);
+            gen_value(Value::If {
+                cond: Box::new(lhs),
+                then: Box::new(Value::Bool { value: true, tpe: Bool }),
+                elsë: Box::new(rhs),
+                tpe: Bool
+            }, g, l)
+        }
         ("==", [Bool, Bool]) => {
             let mut code = gen_binary_op(Instr::XorBool, args, g, l);
             code.push(Instr::NotBool);
@@ -472,83 +488,50 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: builtin::Type, g: &mut Globals
             code.push(Instr::NotBool);
             code
         }
+        ("chr", [Int]) => {
+            let mut code = gen_value(first(args), g, l);
+            code.push(Instr::IntToTextAscii);
+            code
+        }
         ("print", [Text]) => {
             let mut code = gen_value(first(args), g, l);
             code.push(Instr::PrintText);
             code
         }
-        ("list", _) => {
-            let item_t = match tpe {
-                List { item } => Type::from(&item),
-                _ => unreachable!()
-            };
-            let array_t = Type::Array(Box::new(item_t.clone()));
-            let len = args.len() as i64;
+        ("array", [Int]) => {
+            let item_t = Type::from(&tpe).array_item();
 
-            let array_id = l.alloc(array_t.clone());
-
-            let mut code = vec![];
-            code.push(Instr::PushInt { value: len });
-            code.push(Instr::NewArray { item: item_t.clone() });
-            code.push(Instr::SetLocal { id: array_id, tpe: array_t.clone() });
-
-            for (i, arg) in args.into_iter().enumerate() {
-                code.push(Instr::GetLocal { id: array_id, tpe: array_t.clone() });
-                code.push(Instr::PushInt { value: i as i64 });
-                code.extend(gen_value(arg, g, l));
-                code.push(Instr::SetArray { item: item_t.clone() });
-            }
-
-            code.push(Instr::GetLocal { id: array_id, tpe: array_t.clone() });
-            code.push(Instr::PushInt { value: len });
-            code.push(Instr::NewTuple { fields: vec![array_t, Type::Int]});
+            let mut code = gen_value(first(args), g, l);
+            code.push(Instr::NewArray { item: item_t });
             code
         }
         ("len", [Text]) => {
-            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            let mut code = gen_value(first(args), g, l);
             code.push(Instr::LenText);
             code
         }
-        ("len", [List { item }]) => {
-            let array_t = Type::Array(Box::new(Type::from(item)));
-
-            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
-            code.push(Instr::GetField { fields: vec![array_t, Type::Int], i: 1 });
+        ("len", [Array { item }]) => {
+            let mut code = gen_value(first(args), g, l);
+            code.push(Instr::LenArray { item: Type::from(item) });
             code
         }
         ("get", [Text, Int]) => {
             gen_binary_op(Instr::GetText, args, g, l)
         }
-        ("get", [List { item }, Int]) => {
-            let (list, idx) = first2(args);
+        ("get", [Array { item }, Int]) => {
             let item_t = Type::from(&item);
-            let array_t = Type::Array(Box::new(item_t.clone()));
-
-            let mut code = gen_value(list, g, l);
-            code.push(Instr::GetField { fields: vec![array_t, Type::Int], i: 0 });
-            code.extend(gen_value(idx, g, l));
-            code.push(Instr::GetArray { item: item_t });
-            code
+            gen_binary_op(Instr::GetArray { item: item_t }, args, g, l)
         }
-        ("set", [List { item }, Int, _]) => {
-            let (list, idx, val) = first3(args);
-            let item_t = Type::from(&item);
-            let array_t = Type::Array(Box::new(item_t.clone()));
+        ("set", [Array { item }, Int, _]) => {
+            let (array, idx, val) = first3(args);
 
-            let mut code = gen_value(list, g, l);
-            code.push(Instr::GetField { fields: vec![array_t, Type::Int], i: 0 });
+            let mut code = gen_value(array, g, l);
             code.extend(gen_value(idx, g, l));
             code.extend(gen_value(val, g, l));
-            code.push(Instr::SetArray { item: item_t });
+            code.push(Instr::SetArray { item: Type::from(&item) });
             code
         }
-        ("del", [List { item }, Int]) => {
-            todo!()
-        }
-        ("insert", [List { item }, Int, _]) => {
-            todo!()
-        }
-        _ => todo!()
+        _ => unreachable!()
     }
 }
 
