@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtin::{self, void};
+use crate::builtin::{self, apply_builtin_fn, void};
 use crate::midend::{globals::Globals, locals::Locals};
 use crate::typecheck::Value;
 use crate::midend::ir::*;
@@ -541,6 +541,12 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: builtin::Type, g: &mut Globals
             code.extend(gen_value(val, g, l));
             code.push(Instr::SetArray { item: item_t });
             code
+        }
+        ("del", [List { item }, Int]) => {
+            todo!()
+        }
+        ("insert", [List { item }, Int, _]) => {
+            todo!()
         }
         _ => todo!()
     }

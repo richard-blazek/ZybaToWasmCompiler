@@ -60,7 +60,7 @@ fn main() {
         result = list[Int];
         i = 0;
         while i < n {
-            insert[result, len[result], i + 1];
+#            insert[result, len[result], i + 1];
             i = i + 1;
         }
         result
@@ -70,7 +70,7 @@ fn main() {
         result = list[Int];
         for lst : LoL {
             for item : lst {
-                insert[result, len[result], item];
+#                insert[result, len[result], item];
             }
         }
         result
@@ -80,8 +80,8 @@ fn main() {
         result = list[Int];
         i = 0;
         while (i < len[a]) & (i < len[b]) {
-            insert[result, len[result], get[a, i]];
-            insert[result, len[result], get[b, i]];
+#            insert[result, len[result], get[a, i]];
+#            insert[result, len[result], get[b, i]];
             i = i + 1;
         }
         result
@@ -90,8 +90,8 @@ fn main() {
     main = fun[] () {
         nums_to_120 = range[math::factorial[5]];
         for i, num : nums_to_120 {
-            print[text[i]];
-            print[text[num]];
+#            print[text[i]];
+#            print[text[num]];
         }
     };".to_string());
 
@@ -129,5 +129,12 @@ fn main() {
     };
     println!("Ok");
 
-    midend::codegen(&main_fn, decls);
+    let program = midend::codegen(&main_fn, decls);
+    let main_id = program.entry();
+    let main = &program.funcs()[main_id];
+
+    println!("Main (#{}) - locals used: {:?}", main_id, main.locals());
+    for (i, instr) in main.code().iter().enumerate() {
+        println!("{}: {:?}", i, instr)
+    }
 }

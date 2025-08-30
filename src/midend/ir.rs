@@ -71,6 +71,10 @@ pub enum Instr {
     // stack after:  [any, fields[i]]
     GetField { fields: Vec<Type>, i: usize },
 
+    // stack before: [any, { fields[0], .., fields[N-1] }, value]
+    // stack after:  [any, { fields[0], .., fields[i]=value, .., fields[N-1] }
+    SetField { fields: Vec<Type>, i: usize },
+
     // the local with type=tpe, id=id and a value=value
     // stack before: [any]
     // stack after: [any, value]
