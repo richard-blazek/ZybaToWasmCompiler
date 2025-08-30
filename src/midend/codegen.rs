@@ -415,6 +415,51 @@ fn gen_builtin(op: String, args: Vec<Value>, g: &mut Globals, l: &mut Locals) ->
         ("==" | "!=" | "<" | "<=" | ">" | ">=", [t, _]) => {
             gen_cmp(&op, t, args, g, l)
         }
+        ("int", [Int]) | ("real", [Real]) | ("bool", [Bool]) | ("text", [Text]) => {
+            gen_value(args.into_iter().next().unwrap(), g, l)
+        }
+        ("int", [Bool]) => {
+            let arg = args.into_iter().next().unwrap();
+            let value = Value::If {
+                cond: Box::new(arg),
+                then: Box::new(Value::Bool { value: true, tpe: Bool }),
+                elsë: Box::new(Value::Bool { value: true, tpe: Bool }),
+                tpe: Bool
+            };
+            gen_value(value, g, l)
+        }
+        ("int", [Real]) => {
+            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            code.push(Instr::RealToInt);
+            code
+        }
+        ("real", [Int]) => {
+            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            code.push(Instr::IntToReal);
+            code
+        }
+        ("bool", [Int]) => {
+            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            code.push(Instr::PushInt { value: 0 });
+            code.push(Instr::EqInt);
+            code.push(Instr::NotBool);
+            code
+        }
+        ("not", [Int]) => {
+            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            code.push(Instr::NotInt);
+            code
+        }
+        ("not", [Bool]) => {
+            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            code.push(Instr::NotBool);
+            code
+        }
+        ("print", [Text]) => {
+            let mut code = gen_value(args.into_iter().next().unwrap(), g, l);
+            code.push(Instr::PrintText);
+            code
+        }
         _ => todo!()
     }
 }

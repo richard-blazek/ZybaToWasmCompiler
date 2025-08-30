@@ -92,15 +92,8 @@ pub enum Instr {
 
     // stack before: [any, value1]
     // stack after:  [any, value2]
-    BoolToInt,
     RealToInt,
-    TextToInt,
     IntToReal,
-    TextToReal,
-    IntToBool,
-    IntToText,
-    RealToText,
-    BoolToText,
     NotInt,
     NotBool,
 

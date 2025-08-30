@@ -92,10 +92,10 @@ pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> O
     use Type::*;
 
     match (name, type_args, arg_types) {
-        ("int", [], [Int | Bool | Real | Text]) => Some(Int),
-        ("real", [], [Int | Real | Text]) => Some(Real),
+        ("int", [], [Int | Bool | Real]) => Some(Int),
+        ("real", [], [Int | Real]) => Some(Real),
         ("bool", [], [Int | Bool]) => Some(Bool),
-        ("text", [], [Int | Bool | Real | Text]) => Some(Text),
+        ("text", [], [Text]) => Some(Text),
         ("list", [item], _) => {
             if arg_types.iter().all(|t| t == item) {
                 Some(List { item: Box::new(item.clone()) })
