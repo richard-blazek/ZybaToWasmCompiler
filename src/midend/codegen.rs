@@ -252,13 +252,13 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
 
     // Cond
     code.push(Instr::Label { id: start });
+    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
     code.push(Instr::GetLocal { id: expr_id, tpe: expr_t.clone() });
     code.push(Instr::GetField { fields: vec![
         Type::Array(Box::new(val_t.clone())),
         Type::Int
     ], i: 1 });
-    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
-    code.push(Instr::CmpInt { op: Cmp::Neq });
+    code.push(Instr::LtInt);
     code.push(Instr::JumpUnless { id: leave });
 
     // Block
@@ -316,8 +316,107 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Valu
     }]
 }
 
+fn gen_binary_op(op: Instr, mut args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    let rhs = args.pop().unwrap();
+    let lhs = args.pop().unwrap();
+
+    let mut code = gen_value(lhs, g, l);
+    code.extend(gen_value(rhs, g, l));
+    code.push(op);
+    code
+}
+
+fn cmp_instr(op: &str, t: &builtin::Type) -> Instr {
+    match (op, t) {
+        ("==", builtin::Type::Int) => Instr::EqInt,
+        ("<", builtin::Type::Int) => Instr::LtInt,
+        ("==", builtin::Type::Real) => Instr::EqReal,
+        ("<", builtin::Type::Real) => Instr::LtReal,
+        ("==", builtin::Type::Text) => Instr::EqText,
+        ("<", builtin::Type::Text) => Instr::LtText,
+        _ => unreachable!()
+    }
+}
+
+fn gen_cmp(op: &str, t: &builtin::Type, mut args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    let (_, instr, not) = match op {
+        "==" => ({}, cmp_instr("==", t), vec![]),
+        "!=" => ({}, cmp_instr("==", t), vec![Instr::NotBool]),
+        "<" => ({}, cmp_instr("<", t), vec![]),
+        ">=" => ({}, cmp_instr("<", t), vec![Instr::NotBool]),
+        ">" => (args.reverse(), cmp_instr("<", t), vec![]),
+        "<=" => (args.reverse(), cmp_instr("<", t), vec![Instr::NotBool]),
+        _ => unreachable!(),
+    };
+
+    let mut code = gen_binary_op(instr, args, g, l);
+    code.extend(not);
+    code
+}
+
 fn gen_builtin(op: String, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    todo!()
+    use builtin::Type::*;
+
+    let arg_types: Vec<_> = args.iter().map(Value::tpe).collect();
+    match (op.as_str(), &arg_types[..]) {
+        ("*", [Int, Int]) => {
+            gen_binary_op(Instr::MulInt, args, g, l)
+        }
+        ("*", [Real, Real]) => {
+            gen_binary_op(Instr::MulReal, args, g, l)
+        }
+        ("/", [Int, Int]) => {
+            gen_binary_op(Instr::DivInt, args, g, l)
+        }
+        ("/", [Real, Real]) => {
+            gen_binary_op(Instr::DivReal, args, g, l)
+        }
+        ("%", [Int, Int]) => {
+            gen_binary_op(Instr::RemInt, args, g, l)
+        }
+        ("+", [Int, Int]) => {
+            gen_binary_op(Instr::AddInt, args, g, l)
+        }
+        ("+", [Real, Real]) => {
+            gen_binary_op(Instr::AddReal, args, g, l)
+        }
+        ("+", [Text, Text]) => {
+            gen_binary_op(Instr::CatText, args, g, l)
+        }
+        ("-", [Int, Int]) => {
+            gen_binary_op(Instr::SubInt, args, g, l)
+        }
+        ("-", [Real, Real]) => {
+            gen_binary_op(Instr::SubReal, args, g, l)
+        }
+        ("&", [Int, Int]) => {
+            gen_binary_op(Instr::AndInt, args, g, l)
+        }
+        ("&", [Bool, Bool]) => {
+            gen_binary_op(Instr::AndBool, args, g, l)
+        }
+        ("|", [Int, Int]) => {
+            gen_binary_op(Instr::OrInt, args, g, l)
+        }
+        ("|", [Bool, Bool]) => {
+            gen_binary_op(Instr::OrBool, args, g, l)
+        }
+        ("^", [Int, Int]) => {
+            gen_binary_op(Instr::XorInt, args, g, l)
+        }
+        ("^" | "!=", [Bool, Bool]) => {
+            gen_binary_op(Instr::XorBool, args, g, l)
+        }
+        ("==", [Bool, Bool]) => {
+            let mut code = gen_binary_op(Instr::XorBool, args, g, l);
+            code.push(Instr::NotBool);
+            code
+        }
+        ("==" | "!=" | "<" | "<=" | ">" | ">=", [t, _]) => {
+            gen_cmp(&op, t, args, g, l)
+        }
+        _ => todo!()
+    }
 }
 
 fn gen_block(vals: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {

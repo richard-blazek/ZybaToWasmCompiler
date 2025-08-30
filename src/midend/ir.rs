@@ -39,11 +39,6 @@ impl Type {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cmp {
-    Lt, Lte, Eq, Gte, Gt, Neq
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
     // stack before: [any]
@@ -153,10 +148,12 @@ pub enum Instr {
     AddReal,
     SubInt,
     SubReal,
-    CmpInt { op: Cmp },
-    CmpReal { op: Cmp },
-    CmpBool { op: Cmp },
-    CmpText { op: Cmp },
+    LtInt,
+    EqInt,
+    LtReal,
+    EqReal,
+    LtText,
+    EqText,
     AndInt,
     AndBool,
     OrInt,

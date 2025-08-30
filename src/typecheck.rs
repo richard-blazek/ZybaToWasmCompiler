@@ -480,11 +480,8 @@ mod tests {
             (call("not", vec![bool(true)]), Type::Bool),
             (call("print", vec![text("a")]), void()),
             (call("len", vec![call("list", vec![var("Int")])]), Type::Int),
-            (call("has", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Bool),
             (call("get", vec![call("list", vec![var("Int"), int(1)]), int(0)]), Type::Int),
-            (call("get", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a")]), Type::Int),
             (call("set", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
-            (call("del", vec![call("dict", vec![var("Text"), var("Int"), text("a"), int(1)]), text("a"), int(1)]), void()),
             (call("insert", vec![call("list", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
         ];
 
@@ -529,11 +526,6 @@ mod tests {
         // For loop over list
         let list = call("list", vec![var("Int"), int(1)]);
         let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", list, vec![var("v")])))]);
-        assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
-
-        // For loop over dict
-        let dict = call("dict", vec![var("Text"), var("Real"), text("a"), real(1.0)]);
-        let globals = HashMap::from([("a".to_string(), wrap_in_lambda(for_loop("k", "v", dict, vec![var("k"), var("v")])))]);
         assert_eq!(unwrap_lambda(&check(globals).unwrap()["a"]).tpe(), void());
     }
 

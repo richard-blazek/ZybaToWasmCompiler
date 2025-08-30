@@ -166,7 +166,7 @@ pub fn apply_builtin_op(name: &str, lhs: Type, rhs: Type) -> Option<Type> {
         ("==" | "!=" | "<" | "<=" | ">" | ">=", Int, Int) => Some(Bool),
         ("==" | "!=" | "<" | "<=" | ">" | ">=", Real, Real) => Some(Bool),
         ("==" | "!=" | "<" | "<=" | ">" | ">=", Text, Text) => Some(Bool),
-        ("==" | "!=" | "<" | "<=" | ">" | ">=", Bool, Bool) => Some(Bool),
+        ("==" | "!=", Bool, Bool) => Some(Bool),
 
         ("&", Int, Int) => Some(Int),
         ("&", Bool, Bool) => Some(Bool),
