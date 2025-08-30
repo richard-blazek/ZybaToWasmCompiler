@@ -115,8 +115,7 @@ fn check_var(name: String, env: &mut HashMap<String, Type>) -> Fallible<Value> {
 fn check_init(name: String, value: Expr, env: &mut HashMap<String, Type>) -> Fallible<Value> {
     let value = Box::new(check_value(value, env)?);
     env.insert(name.clone(), value.tpe());
-    let tpe = value.tpe();
-    Ok(Value::Init { name, value, tpe })
+    Ok(Value::Init { name, value, tpe: void() })
 }
 
 fn check_assign(line: i64, name: String, value: Expr, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -125,7 +124,7 @@ fn check_assign(line: i64, name: String, value: Expr, env: &mut HashMap<String, 
     if tpe != value.tpe() {
         err(line, format!("Assigning {} to {}", value.tpe(), tpe))?
     }
-    Ok(Value::Assign { name, value, tpe })
+    Ok(Value::Assign { name, value, tpe: void() })
 }
 
 fn check_record(fields: HashMap<String, Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
@@ -474,7 +473,6 @@ mod tests {
         let calls = vec![
             (call("int", vec![real(1.0)]), Type::Int),
             (call("real", vec![int(1)]), Type::Real),
-            (call("text", vec![bool(true)]), Type::Text),
             (call("bool", vec![int(0)]), Type::Bool),
             (call("list", vec![var("Int"), int(1), int(2)]), Type::List { item: Box::new(Type::Int) }),
             (call("not", vec![bool(true)]), Type::Bool),

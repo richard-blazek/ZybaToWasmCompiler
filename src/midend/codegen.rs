@@ -137,6 +137,7 @@ fn gen_assign(name: String, value: Value, g: &mut Globals, l: &mut Locals) -> Ve
 
     let mut code = gen_value(value, g, l);
     code.push(Instr::SetLocal { id, tpe });
+    code.push(Instr::NewTuple { fields: vec![] });
     code
 }
 
@@ -598,7 +599,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
                 let func = Func::new(code, l.get_all());
                 g.set_func(g.func_id(&name), func);
             }
-            _ => unreachable!()
+            _ => {}
         }
     }
 
