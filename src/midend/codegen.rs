@@ -227,6 +227,53 @@ fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<I
     code
 }
 
+fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    let leave = g.new_label();
+    let start = g.new_label();
+
+    let val_t = match expr.tpe() {
+        builtin::Type::List { item } => Type::from(&*item),
+        _ => unreachable!()
+    };
+    let expr_t = Type::Tuple(vec![
+        Type::Array(Box::new(val_t.clone())),
+        Type::Int
+    ]);
+
+    let key_id = l.define(key, Type::Int);
+    let val_id = l.define(value, val_t.clone());
+    let expr_id = l.alloc(expr_t.clone());
+
+    // Init
+    let mut code = gen_value(expr, g, l);
+    code.push(Instr::SetLocal { id: expr_id, tpe: expr_t.clone() });
+    code.push(Instr::PushInt { value: 0 });
+    code.push(Instr::SetLocal { id: key_id, tpe: Type::Int });
+
+    // Cond
+    code.push(Instr::Label { id: start });
+    code.push(Instr::GetLocal { id: expr_id, tpe: expr_t.clone() });
+    code.push(Instr::GetField { fields: vec![
+        Type::Array(Box::new(val_t.clone())),
+        Type::Int
+    ], i: 1 });
+    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
+    code.push(Instr::CmpInt { op: Cmp::Neq });
+    code.push(Instr::JumpUnless { id: leave });
+
+    // Block
+    code.push(Instr::SetLocal { id: val_id, tpe: val_t.clone() });
+    code.extend(gen_value(body, g, l));
+    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
+    code.push(Instr::PushInt { value: 1 });
+    code.push(Instr::AddInt);
+    code.push(Instr::SetLocal { id: key_id, tpe: Type::Int });
+
+    // End
+    code.push(Instr::Label { id: leave });
+    code
+}
+
 fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let captures = collect_captures(&body, args.iter().map(|(n, _)| {
         n.clone()
@@ -267,10 +314,6 @@ fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Valu
         ret: Type::from(&ret),
         capture: capture_types
     }]
-}
-
-fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    todo!()
 }
 
 fn gen_builtin(op: String, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
