@@ -20,7 +20,7 @@ fn main() {
     pi = 3.142;
     ".to_string());
 
-    files.insert("main.zyba".to_string(), "
+    files.insert("funcs.zyba".to_string(), "
     import \"math.zyba\";
 
     private circleArea = fun[radius: Real] Real {
@@ -66,9 +66,17 @@ fn main() {
         }
     };".to_string());
 
+    files.insert("hello.zyba".to_string(), "
+    main = fun[] () {
+        print[\"Hi\"];
+    };
+    
+    pi = 3.142;
+    ".to_string());
+
     let fs: &dyn frontend::FS = &frontend::playground_fs(files);
 
-    let (main_fn, decls) = match frontend::compile(fs, "main.zyba") {
+    let (main_fn, decls) = match frontend::compile(fs, "hello.zyba") {
         Ok((main_path, files)) => {
             (main_path, files)
         },

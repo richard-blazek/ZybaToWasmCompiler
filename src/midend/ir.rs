@@ -176,7 +176,8 @@ pub enum Instr {
 pub struct Func {
     pub code: Vec<Instr>,
     pub args: Vec<Type>,
-    pub ret: Type
+    pub ret: Type,
+    pub captures: Vec<(usize, Type)>
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -54,7 +54,10 @@ impl Globals {
 
         let mut funcs = vec![];
         funcs.resize(counter, Func {
-            code: vec![], args: vec![], ret: Type::Bool
+            code: vec![],
+            args: vec![],
+            ret: Type::Tuple(vec![]),
+            captures: vec![]
         });
 
         Globals { instrs, funcs, func_ids, counter, labels: 0 }

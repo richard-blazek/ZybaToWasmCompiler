@@ -94,21 +94,20 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
         Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),
         Instr::CallFunc { args, ret } => {
-            fmt!(s, "(global.tee $handy1)");
-            fmt!(s, "(global.set $capture_ptr (i32.add (i32.const 1)))");
+            fmt!(s, "(global.set $handy1)");
+            fmt!(s, "(global.set $capture_ptr (i32.add (global.get $handy1) (i32.const 1)))");
             fmt!(s, "(i32.load (global.get $handy1))");
 
             fmt!(s, "(call_indirect (type ${}))", fn_types.type_of(&args, &ret));
         }
         Instr::BindFunc { id, captures, .. } => {
-            fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", (captures.len() + 2) * 8);
+            fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", (captures.len() + 1) * 8);
             fmt!(s, "(i32.store (i32.const {}) (global.get $handy1))", id);
-            fmt!(s, "(i64.store (i64.const {}) (global.get $handy1) offset=8)", captures.len());
             for (i, (loc_id, tpe)) in captures.into_iter().enumerate() {
                 fmt!(s, "(global.get $handy1)");
                 fmt!(s, "(local.get {})", loc_id);
                 fmt!(s, "(global.get $handy1)");
-                fmt!(s, "({}.store offset={})", type_to_str(&tpe), 16 + i * 8);
+                fmt!(s, "({}.store offset={})", type_to_str(&tpe), (i + 1) * 8);
             }
             fmt!(s, "(global.get $handy1)");
         }
@@ -123,14 +122,10 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         }
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
         Instr::NotBool => fmt!(s, "(i32.eqz)"),
-        Instr::PrintText => {
-            fmt!(s, "(global.tee $handy1)");
-            fmt!(s, "(call $strlen (global.get $handy1))");
-            fmt!(s, "(call $puts)");
-        }
+        Instr::PrintText => fmt!(s, "(call $puts)(i32.const 0)"),
         Instr::NewArray { item: _item } => {
             fmt!(s, "(global.set $handy1 (i32.wrap_i64))");
-            fmt!(s, "(global.set $handy2 (call $malloc (i32.add (i32.mul (global.get $handy1) (i32.const 8)) (i32.const 1))))");
+            fmt!(s, "(global.set $handy2 (call $malloc (i32.wrap_i64 (i32.add (i32.mul (global.get $handy1) (i32.const 8)) (i32.const 1)))))");
             fmt!(s, "(i64.store (i64.extend_i32_s (global.get $handy1)) (global.get $handy2))");
         }
         Instr::LenArray { item: _item } => {
@@ -154,7 +149,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::CatText => fmt!(s, "(call $strcat)"),
         Instr::LtText => fmt!(s, "(call $strcmp_lt)"),
         Instr::EqText => fmt!(s, "(call $strcmp_eq)"),
-        Instr::LenText => fmt!(s, "(call $strlen)"),
+        Instr::LenText => fmt!(s, "(i64.extend_i32_s (call $strlen))"),
         Instr::MulInt => fmt!(s, "(i64.mul)"),
         Instr::MulReal => fmt!(s, "(f64.add)"),
         Instr::DivInt => fmt!(s, "(i64.div_s)"),
@@ -184,19 +179,24 @@ fn gen_instrs(s: &mut String, fn_types: &mut FnTypes, instrs: Vec<Instr>) {
     }
 }
 
-fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Type) {
+fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
     fmt!(s, "(func $func_{} ", i);
 
-    if !args.is_empty() {
+    if !f.args.is_empty() {
         fmt!(s, "(param");
-        for arg in &args {
+        for arg in &f.args {
             fmt!(s, " {}", type_to_str(arg));
         }
         fmt!(s, ") ");
     }
-    fmt!(s, "(result {})", type_to_str(&ret));
+    fmt!(s, "(result {})", type_to_str(&f.ret));
 
-    gen_instrs(s, fn_types, code);
+    for (i, (loc_id, capture)) in f.captures.into_iter().enumerate() {
+        fmt!(s, "({}.load (global.get $capture_ptr) offset={})", type_to_str(&capture), i * 8);
+        fmt!(s, "(local.set {})", loc_id);
+    }
+
+    gen_instrs(s, fn_types, f.code);
     fmt!(s, ")");
 
     fmt!(s, "(elem (i32.const {}) $func_{})", i, i);
@@ -204,17 +204,17 @@ fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, code: Vec<Instr>, 
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     fmt!(s, "(module
-(import \"env\" \"puts\" (func $puts (param i32 i32)))
+(import \"env\" \"puts\" (func $puts (param i32)))
 
-(func $strlen (param $ptr i32) (result i64)
-  (local $len i64)
-  (local.set $len (i64.const 0))
+(func $strlen (param $ptr i32) (result i32)
+  (local $len i32)
+  (local.set $len (i32.const 0))
   (block $exit
     (loop $loop
       (i32.load8_u (local.get $ptr))
         (br_if $exit (i32.eqz (i32.load8_u (local.get $ptr))))
         (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
-        (local.set $len (i64.add (local.get $len) (i64.const 1)))
+        (local.set $len (i32.add (local.get $len) (i32.const 1)))
         (br $loop)))
   (local.get $len))
 (func $strcmp_eq (param $a i32) (param $b i32) (result i32)
@@ -254,36 +254,30 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     return)
   (i32.const 0))
 
-(memory $mem 1)
+(memory (export \"memory\") 1)
 (global $heap_ptr (mut i32) (i32.const 0))
-(func $malloc (param $sz i64) (result i32)
-    (local $size i32)
+(func $malloc (param $size i32) (result i32)
     (local $old_base i32)
     (local $new_end i32)
-    (local $need_pages i32)
+    (local $need i32)
 
-    (if (i64.eqz (local.get $sz))
+    (if (i32.eqz (local.get $size))
       (then
-        (local.set $size (i32.const 1)))
-      (else
-        (local.set $size (i32.wrap_i64 (local.get $sz)))))
+        (local.set $size (i32.const 1))))
 
-    ;; Align up to 8 bytes: (size + 7) & ~7
     (local.set $size (i32.and (i32.add (local.get $size) (i32.const 7)) (i32.const -8)))
 
     (if (i32.eqz (global.get $heap_ptr))
       (then
-        ;; heap_base = memory.size << 16  (pages -> bytes)
         (global.set $heap_ptr (i32.shl (memory.size) (i32.const 16)))))
 
-    (local.set $old_base (globals.get $heap_ptr))
+    (local.set $old_base (global.get $heap_ptr))
     (local.set $new_end (i32.add (local.get $old_base) (local.get $size)))
     (local.set $need (i32.shr_u (i32.add (local.get $new_end) (i32.const 65535)) (i32.const 16)))
     (local.set $need (i32.sub (local.get $need) (memory.size)))
 
     (if (i32.gt_s (local.get $need) (i32.const 0))
       (then
-        ;; memory.grow returns -1 on failure
         (if (i32.eq (memory.grow (local.get $need)) (i32.const -1))
           (then
             (unreachable)))))
@@ -337,13 +331,13 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
 
     let mut fn_types = FnTypes { map: HashMap::new() };
     for (i, func) in funcs.into_iter().enumerate() {
-        gen_func(s, &mut fn_types, i, func.code, func.args, func.ret);
+        gen_func(s, &mut fn_types, i, func);
     }
 
     fn_types.gen_signatures(s);
 
-    fmt!(s, "(start $func_{})", entry);
-    fmt!(s, ")");
+    fmt!(s, "(func (export \"main\") (call $func_{}) (drop))", entry);
+    fmt!(s, ") ");
 }
 
 pub fn generate(program: Program) -> String {

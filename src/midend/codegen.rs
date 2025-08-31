@@ -289,12 +289,15 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
         tpe
     }).collect::<Vec<_>>();
 
-    let captures = captures.into_iter().map(|name| {
+    let mut captures_bind = vec![];
+    let mut captures_open = vec![];
+    for name in captures {
         let tpe = l.get_type(&name);
-        let id = l.get_id(&name);
-        inner.define(name, tpe.clone());
-        (id, tpe)
-    }).collect::<Vec<_>>();
+        let outer_id = l.get_id(&name);
+        let inner_id = inner.define(name, tpe.clone());
+        captures_bind.push((outer_id, tpe.clone()));
+        captures_open.push((inner_id, tpe));
+    }
 
     let tpe = Type::from(&body.tpe());
     let ret_t = Type::from(&ret);
@@ -308,14 +311,15 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
             }
         ),
         args: args.clone(),
-        ret: ret_t.clone()
+        ret: ret_t.clone(),
+        captures: captures_open
     };
 
     vec![Instr::BindFunc {
         id: g.add_lambda(func),
         args,
-        ret: ret_t.clone(),
-        captures
+        ret: ret_t,
+        captures: captures_bind
     }]
 }
 
@@ -568,7 +572,8 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
                 let func = Func {
                     code: gen_value(*body, &mut g, &mut l),
                     args: arg_types,
-                    ret: Type::from(&ret)
+                    ret: Type::from(&ret),
+                    captures: vec![]
                 };
                 g.set_func(g.func_id(&name), func);
             }
