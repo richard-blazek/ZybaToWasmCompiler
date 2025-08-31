@@ -75,7 +75,9 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
         Instr::NotBool => fmt!(s, "(i32.eqz)"),
         Instr::PrintText => {
-            todo!()
+            fmt!(s, "(global.tee $handy1)");
+            fmt!(s, "(call $strlen (global.get $handy1))");
+            fmt!(s, "(call $puts)");
         }
         Instr::NewArray { item } => {
             fmt!(s, "(global.set $handy1 (i32.wrap_i64))");
@@ -147,6 +149,8 @@ fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Ty
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     fmt!(s, "(module
+(import \"env\" \"puts\" (func $puts (param i32 i32)))
+
 (func $strlen (param $ptr i32) (result i64)
   (local $len i64)
   (local.set $len (i64.const 0))
