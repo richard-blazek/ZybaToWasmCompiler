@@ -1,14 +1,6 @@
 use std::collections::HashMap;
 
-mod error;
-mod lexer;
-mod parser;
-mod filesystem;
-mod loader;
-mod nameres;
-mod builtin;
-mod typecheck;
-
+mod frontend;
 mod midend;
 
 fn main() {
@@ -73,26 +65,15 @@ fn main() {
         }
     };".to_string());
 
-    let fs = filesystem::playground_fs(files);
+    let fs = frontend::playground_fs(files);
 
-    let (main_path, files) = match loader::load(&fs, "main.zyba") {
+    let (main_fn, decls) = match frontend::compile(&fs, "main.zyba") {
         Ok((main_path, files)) => {
             (main_path, files)
         },
-        Err(e) => panic!("{:?}", e)
-    };
-
-    println!("Main: {}", main_path);
-    for (name, decls) in files.iter() {
-        println!("File: {}", name);
-        println!("Content: {:?}", decls);
-    }
-
-    let (main_fn, decls) = match nameres::name_resolution(main_path, files) {
-        Ok((main_fn, decls)) => {
-            (main_fn, decls)
+        Err(error) => {
+            panic!("Error: {:?}", error)
         }
-        Err(e) => panic!("{:?}", e)
     };
 
     println!("Main function: {}", main_fn);
@@ -100,12 +81,6 @@ fn main() {
         println!("Declaration: {}", name);
         println!("Value: {:?}", value);
     }
-
-    let decls = match typecheck::check(decls) {
-        Ok(decls) => decls,
-        Err(e) => panic!("Error: {:?}", e)
-    };
-    println!("Ok");
 
     let program = midend::codegen(&main_fn, decls);
     let main_id = program.entry();

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtin::is_builtin_operator;
-use crate::error::{err, Fallible};
-use crate::lexer::{Token, tokenize};
+use crate::frontend::builtin::is_builtin_operator;
+use crate::frontend::error::{err, Fallible};
+use crate::frontend::lexer::{Token, tokenize};
 
 // <file> ::= (<decl> ";")*
 // <decl> ::= <import> | <const>

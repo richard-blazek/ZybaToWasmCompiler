@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::builtin::is_builtin_name;
-use crate::error::{err, Fallible};
-use crate::parser::{Decl, Tree};
+use crate::frontend::builtin::is_builtin_name;
+use crate::frontend::error::{err, Fallible};
+use crate::frontend::parser::{Decl, Tree};
 
 fn builtin_check(line: i64, name: &str) -> Fallible<()> {
     if is_builtin_name(name) {

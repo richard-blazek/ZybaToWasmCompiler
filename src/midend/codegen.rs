@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtin::{self, void};
+use crate::frontend::{self, void, Value};
 use crate::midend::{globals::Globals, locals::Locals};
-use crate::typecheck::Value;
 use crate::midend::ir::*;
 use crate::midend::utils::*;
 
@@ -121,7 +120,7 @@ fn gen_bool(value: bool) -> Vec<Instr> {
     vec![Instr::PushBool { value }]
 }
 
-fn gen_var(name: String, tpe: builtin::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_var(name: String, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     if g.contains(&name) {
         vec![g.fetch(&name)]
     } else {
@@ -155,7 +154,7 @@ fn gen_record(fields: Vec<(String, Value)>, g: &mut Globals, l: &mut Locals) -> 
     }).chain([Instr::NewTuple { fields: types }]).collect()
 }
 
-fn gen_call(func: Value, args: Vec<Value>, ret: builtin::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_call(func: Value, args: Vec<Value>, ret: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let args_t = args.iter().map(|a| Type::from(&a.tpe())).collect();
     let ret = Type::from(&ret);
 
@@ -169,7 +168,7 @@ fn gen_call(func: Value, args: Vec<Value>, ret: builtin::Type, g: &mut Globals, 
 
 fn gen_access(object: Value, field: String, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let fields = sorted(match object.tpe() {
-        builtin::Type::Record { fields } => fields,
+        frontend::Type::Record { fields } => fields,
         _ => unreachable!(),
     }, |(n, _)| n);
 
@@ -181,7 +180,7 @@ fn gen_access(object: Value, field: String, g: &mut Globals, l: &mut Locals) -> 
     code
 }
 
-fn gen_if(cond: Value, then: Value, elsë: Value, tpe: builtin::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_if(cond: Value, then: Value, elsë: Value, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let if_not = g.new_label();
     let end_if = g.new_label();
 
@@ -273,7 +272,7 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
     code
 }
 
-fn gen_lambda(args: Vec<(String, builtin::Type)>, ret: builtin::Type, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let captures = collect_captures(&body, args.iter().map(|(n, _)| {
         n.clone()
     }).collect(), g);
@@ -342,19 +341,19 @@ fn gen_binary_op(op: Instr, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -
     code
 }
 
-fn cmp_instr(op: &str, t: &builtin::Type) -> Instr {
+fn cmp_instr(op: &str, t: &frontend::Type) -> Instr {
     match (op, t) {
-        ("==", builtin::Type::Int) => Instr::EqInt,
-        ("<", builtin::Type::Int) => Instr::LtInt,
-        ("==", builtin::Type::Real) => Instr::EqReal,
-        ("<", builtin::Type::Real) => Instr::LtReal,
-        ("==", builtin::Type::Text) => Instr::EqText,
-        ("<", builtin::Type::Text) => Instr::LtText,
+        ("==", frontend::Type::Int) => Instr::EqInt,
+        ("<", frontend::Type::Int) => Instr::LtInt,
+        ("==", frontend::Type::Real) => Instr::EqReal,
+        ("<", frontend::Type::Real) => Instr::LtReal,
+        ("==", frontend::Type::Text) => Instr::EqText,
+        ("<", frontend::Type::Text) => Instr::LtText,
         _ => unreachable!()
     }
 }
 
-fn gen_cmp(op: &str, t: &builtin::Type, mut args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+fn gen_cmp(op: &str, t: &frontend::Type, mut args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let (_, instr, not) = match op {
         "==" => ({}, cmp_instr("==", t), vec![]),
         "!=" => ({}, cmp_instr("==", t), vec![Instr::NotBool]),
@@ -370,8 +369,8 @@ fn gen_cmp(op: &str, t: &builtin::Type, mut args: Vec<Value>, g: &mut Globals, l
     code
 }
 
-fn gen_builtin(op: String, args: Vec<Value>, tpe: builtin::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    use builtin::Type::*;
+fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    use frontend::Type::*;
 
     let arg_types: Vec<_> = args.iter().map(Value::tpe).collect();
     match (op.as_str(), &arg_types[..]) {

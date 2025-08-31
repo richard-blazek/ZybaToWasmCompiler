@@ -1,4 +1,4 @@
-use crate::error::{Fallible, err};
+use crate::frontend::error::{Fallible, err};
 
 // <int> ::= [0-9]+
 // <real> ::= <int> "." [0-9]*

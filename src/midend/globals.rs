@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::midend::ir::{Func, Instr, Type};
-use crate::typecheck::Value;
+use crate::frontend::Value;
 
 pub struct Globals {
     funcs: Vec<Func>,

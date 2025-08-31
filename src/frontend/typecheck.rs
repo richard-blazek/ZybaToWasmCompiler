@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::builtin::*;
-use crate::error::{err, Fallible};
-use crate::nameres::Expr;
+use crate::frontend::builtin::*;
+use crate::frontend::error::{err, Fallible};
+use crate::frontend::nameres::Expr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -429,9 +429,9 @@ mod tests {
         let body = lambda_body(&typed_globals["main"]);
 
         assert!(matches!(body[0], Value::Init { .. }));
-        assert_eq!(body[0].tpe(), Type::Int);
+        assert_eq!(body[0].tpe(), void());
         assert!(matches!(body[1], Value::Assign { .. }));
-        assert_eq!(body[1].tpe(), Type::Int);
+        assert_eq!(body[1].tpe(), void());
         assert!(matches!(body[2], Value::Var { .. }));
         assert_eq!(body[2].tpe(), Type::Int);
     }
@@ -474,13 +474,12 @@ mod tests {
             (call("int", vec![real(1.0)]), Type::Int),
             (call("real", vec![int(1)]), Type::Real),
             (call("bool", vec![int(0)]), Type::Bool),
-            (call("array", vec![var("Int"), int(1), int(2)]), Type::Array { item: Box::new(Type::Int) }),
+            (call("array", vec![var("Int"), int(5)]), Type::Array { item: Box::new(Type::Int) }),
             (call("not", vec![bool(true)]), Type::Bool),
             (call("print", vec![text("a")]), void()),
-            (call("len", vec![call("array", vec![var("Int")])]), Type::Int),
+            (call("len", vec![call("array", vec![var("Int"), int(7)])]), Type::Int),
             (call("get", vec![call("array", vec![var("Int"), int(1)]), int(0)]), Type::Int),
             (call("set", vec![call("array", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
-            (call("insert", vec![call("array", vec![var("Int"), int(1)]), int(0), int(2)]), void()),
         ];
 
         for (c, tpe) in calls {

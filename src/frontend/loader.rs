@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::error::{Fallible, err};
-use crate::filesystem;
-use crate::parser;
+use crate::frontend::error::{Fallible, err};
+use crate::frontend::filesystem;
+use crate::frontend::parser;
 
 fn read_file<FS: filesystem::FS>(fs: &FS, file_path: &str) -> Fallible<Vec<parser::Decl>> {
     let content = if let Some(content) = fs.read(file_path) {

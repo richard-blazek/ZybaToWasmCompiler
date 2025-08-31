@@ -1,4 +1,4 @@
-use crate::builtin;
+use crate::frontend;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -12,22 +12,22 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn from(t: &builtin::Type) -> Type {
+    pub fn from(t: &frontend::Type) -> Type {
         use crate::midend::utils::sorted;
 
         match t {
-            builtin::Type::Int => Type::Int,
-            builtin::Type::Real => Type::Real,
-            builtin::Type::Text => Type::Text,
-            builtin::Type::Bool => Type::Bool,
-            builtin::Type::Array { item } => Type::Array(
+            frontend::Type::Int => Type::Int,
+            frontend::Type::Real => Type::Real,
+            frontend::Type::Text => Type::Text,
+            frontend::Type::Bool => Type::Bool,
+            frontend::Type::Array { item } => Type::Array(
                 Box::new(Type::from(&**item))
             ),
-            builtin::Type::Func { args, ret } => Type::Func(
+            frontend::Type::Func { args, ret } => Type::Func(
                 args.into_iter().map(Type::from).collect(),
                 Box::new(Type::from(&**ret))
             ),
-            builtin::Type::Record { fields } => {
+            frontend::Type::Record { fields } => {
                 let vec: Vec<_> = sorted(fields, |(n, _)| n);
 
                 Type::Tuple(vec.into_iter().map(|(_, t)| {
