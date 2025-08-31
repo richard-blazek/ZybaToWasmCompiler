@@ -50,10 +50,10 @@ fn gen_instr(s: &mut String, instr: Instr) {
             fmt!(s, "(global.get $handy1)");
         }
         Instr::GetField { fields, i } => {
-            fmt!(s, "(i64.load offset={})", i * 8);
+            fmt!(s, "({}.load offset={})", type_to_str(&fields[i]), i * 8);
         }
         Instr::SetField { fields, i } => {
-            fmt!(s, "(i64.store offset={})", i * 8);
+            fmt!(s, "({}.store offset={})", type_to_str(&fields[i]), i * 8);
         }
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
         Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),

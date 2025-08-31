@@ -4,7 +4,7 @@ use crate::frontend::error::{Fallible, err};
 use crate::frontend::filesystem;
 use crate::frontend::parser;
 
-fn read_file<FS: filesystem::FS>(fs: &FS, file_path: &str) -> Fallible<Vec<parser::Decl>> {
+fn read_file(fs: &dyn filesystem::FS, file_path: &str) -> Fallible<Vec<parser::Decl>> {
     let content = if let Some(content) = fs.read(file_path) {
         content
     } else {
@@ -13,7 +13,7 @@ fn read_file<FS: filesystem::FS>(fs: &FS, file_path: &str) -> Fallible<Vec<parse
     parser::parse(&content)
 }
 
-fn load_module<FS: filesystem::FS>(fs: &FS, module_path: &str) -> Fallible<(Vec<parser::Decl>, Vec<String>)> {
+fn load_module(fs: &dyn filesystem::FS, module_path: &str) -> Fallible<(Vec<parser::Decl>, Vec<String>)> {
     let mut decls = read_file(fs, module_path)?;
     let mut imports = vec![];
     for decl in &mut decls {
@@ -30,7 +30,7 @@ fn load_module<FS: filesystem::FS>(fs: &FS, module_path: &str) -> Fallible<(Vec<
     Ok((decls, imports))
 }
 
-fn load_modules<FS: filesystem::FS>(fs: &FS, main_path: &str) -> Fallible<HashMap<String, Vec<parser::Decl>>> {
+fn load_modules(fs: &dyn filesystem::FS, main_path: &str) -> Fallible<HashMap<String, Vec<parser::Decl>>> {
     let mut modules = HashMap::new();
     let mut remaining = vec![main_path.to_string()];
     while let Some(path) = remaining.pop() {
@@ -43,7 +43,7 @@ fn load_modules<FS: filesystem::FS>(fs: &FS, main_path: &str) -> Fallible<HashMa
     Ok(modules)
 }
 
-pub fn load<FS: filesystem::FS>(fs: &FS, main_path: &str) -> Fallible<(String, HashMap<String, Vec<parser::Decl>>)> {
+pub fn load(fs: &dyn filesystem::FS, main_path: &str) -> Fallible<(String, HashMap<String, Vec<parser::Decl>>)> {
     if let Some(main_path) = fs.to_absolute(main_path, None) {
         let files = load_modules(fs, &main_path)?;
         Ok((main_path, files))

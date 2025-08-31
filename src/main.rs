@@ -66,9 +66,9 @@ fn main() {
         }
     };".to_string());
 
-    let fs = frontend::playground_fs(files);
+    let fs: &dyn frontend::FS = &frontend::playground_fs(files);
 
-    let (main_fn, decls) = match frontend::compile(&fs, "main.zyba") {
+    let (main_fn, decls) = match frontend::compile(fs, "main.zyba") {
         Ok((main_path, files)) => {
             (main_path, files)
         },
@@ -93,4 +93,6 @@ fn main() {
     }
 
     println!("Main: #{}", program.entry);
+
+    println!("{}", backend::to_wasm(program));
 }
