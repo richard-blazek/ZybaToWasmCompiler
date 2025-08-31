@@ -25,9 +25,15 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::PushText { value } => gen_text_literal(s, value),
         Instr::PushBool { value } => fmt!(s, "i32.const {}\n", value as i32),
         Instr::Drop { .. } => fmt!(s, "drop\n"),
-        Instr::Label { id } => todo!(),
-        Instr::JumpAlways { id } => todo!(),
-        Instr::JumpUnless { id } => todo!(),
+        Instr::Block { id, inner } => {
+            fmt!(s, "(block $block_{}\n", id);
+            fmt!(s, "(loop $loop_{}\n", id);
+            gen_instrs(s, inner);
+            fmt!(s, ")\n)\n");
+        }
+        Instr::RepeatBlock { id } => fmt!(s, "br $loop_{}\n", id),
+        Instr::QuitBlock { id } => fmt!(s, "br $block_{}\n", id),
+        Instr::CondBlock { id } => fmt!(s, "i32.eqz\nbr_if $block_{}\n", id),
         Instr::NewTuple { fields } => todo!(),
         Instr::GetField { fields, i } => todo!(),
         Instr::SetField { fields, i } => todo!(),
@@ -73,16 +79,19 @@ fn gen_instr(s: &mut String, instr: Instr) {
     }
 }
 
+fn gen_instrs(s: &mut String, instrs: Vec<Instr>) {
+    for instr in instrs {
+        gen_instr(s, instr);
+    }
+}
+
 fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Type) {
     fmt!(s, "(func $func_{} (param", i);
     for arg in &args {
         fmt!(s, " {}", type_to_str(arg));
     }
     fmt!(s, " i32) (result {})\n", type_to_str(&ret));
-
-    for instr in code {
-        gen_instr(s, instr);
-    }
+    gen_instrs(s, code);
     fmt!(s, ")\n");
 
     fmt!(s, "elem (i32.const {}) $func_{})\n", i, i);

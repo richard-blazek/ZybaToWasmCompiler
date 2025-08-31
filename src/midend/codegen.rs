@@ -104,6 +104,18 @@ fn collect_captures(body: &Value, args: HashSet<String>, g: &mut Globals) -> Vec
     Vec::from_iter(used)
 }
 
+macro_rules! cat {
+    ( $( $x:expr ),* ) => {
+        {
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.extend($x);
+            )*
+            temp_vec
+        }
+    };
+}
+
 fn gen_int(value: i64) -> Vec<Instr> {
     vec![Instr::PushInt { value }]
 }
@@ -133,11 +145,11 @@ fn gen_var(name: String, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -
 fn gen_assign(name: String, value: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let tpe = Type::from(&value.tpe());
     let id = l.get_id(&name);
-
-    let mut code = gen_value(value, g, l);
-    code.push(Instr::SetLocal { id, tpe });
-    code.push(Instr::NewTuple { fields: vec![] });
-    code
+    cat!(
+        gen_value(value, g, l),
+        [Instr::SetLocal { id, tpe }],
+        [Instr::NewTuple { fields: vec![] }]
+    )
 }
 
 fn gen_init(name: String, value: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
@@ -148,22 +160,20 @@ fn gen_init(name: String, value: Value, g: &mut Globals, l: &mut Locals) -> Vec<
 fn gen_record(fields: Vec<(String, Value)>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let values: Vec<_> = fields.into_iter().map(|(_, v)| v).collect();
     let types = values.iter().map(|v| Type::from(&v.tpe())).collect();
-
-    values.into_iter().flat_map(|v| {
-        gen_value(v, g, l)
-    }).chain([Instr::NewTuple { fields: types }]).collect()
+    cat!(
+        values.into_iter().flat_map(|v| gen_value(v, g, l)),
+        [Instr::NewTuple { fields: types }]
+    )
 }
 
 fn gen_call(func: Value, args: Vec<Value>, ret: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let args_t = args.iter().map(|a| Type::from(&a.tpe())).collect();
     let ret = Type::from(&ret);
-
-    let mut code: Vec<_> = args.into_iter().flat_map(|v| {
-        gen_value(v, g, l)
-    }).collect();
-    code.extend(gen_value(func, g, l));
-    code.push(Instr::CallFunc { args: args_t, ret });
-    code
+    cat!(
+        args.into_iter().flat_map(|v| gen_value(v, g, l)),
+        gen_value(func, g, l),
+        [Instr::CallFunc { args: args_t, ret }]
+    )
 }
 
 fn gen_access(object: Value, field: String, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
@@ -174,62 +184,57 @@ fn gen_access(object: Value, field: String, g: &mut Globals, l: &mut Locals) -> 
 
     let i = fields.iter().position(|(n, _)| n == &field).unwrap();
     let types = fields.into_iter().map(|(_, v)| Type::from(&v)).collect();
-
-    let mut code = gen_value(object, g, l);
-    code.push(Instr::GetField { fields: types, i });
-    code
+    cat!(
+        gen_value(object, g, l),
+        [Instr::GetField { fields: types, i }]
+    )
 }
 
 fn gen_if(cond: Value, then: Value, elsë: Value, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let if_not = g.new_label();
-    let end_if = g.new_label();
+    let then_id = g.new_label();
+    let ifte_id = g.new_label();
 
-    let (then_t, elsë_t) = (then.tpe(), elsë.tpe());
-    let drop = tpe == void() && (then_t != void() || elsë_t != void());
+    let then_t = Type::from(&then.tpe());
+    let else_t = Type::from(&elsë.tpe());
 
-    let mut code = gen_value(cond, g, l);
-    code.push(Instr::JumpUnless { id: if_not });
-    code.extend(gen_value(then, g, l));
+    let (drop_then, drop_else) = if tpe == void() {
+        (vec![Instr::Drop { tpe: then_t }, Instr::NewTuple { fields: vec![] }],
+         vec![Instr::Drop { tpe: else_t }, Instr::NewTuple { fields: vec![] }])
+    } else {
+        (vec![], vec![])
+    };
 
-    if drop {
-        code.push(Instr::Drop { tpe: Type::from(&then_t) });
-    }
-    code.push(Instr::JumpAlways { id: end_if });
-    code.push(Instr::Label { id: if_not });
-    code.extend(gen_value(elsë, g, l));
-
-    if drop {
-        code.push(Instr::Drop { tpe: Type::from(&elsë_t) });
-    }
-    code.push(Instr::Label { id: end_if });
-
-    if drop {
-        code.push(Instr::NewTuple { fields: vec![] });
-    }
-    code
+    vec![Instr::Block { id: ifte_id, inner: cat!(
+        [Instr::Block { id: then_id, inner: cat!(
+            gen_value(cond, g, l),
+            [Instr::CondBlock { id: then_id }],
+            gen_value(then, g, l),
+            drop_then,
+            [Instr::QuitBlock { id: ifte_id }]
+        ) }],
+        gen_value(elsë, g, l),
+        drop_else
+    ) }]
 }
 
 fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let leave = g.new_label();
-    let start = g.new_label();
+    let id = g.new_label();
+    let tpe = Type::from(&body.tpe());
 
-    let body_t = body.tpe();
-
-    let mut code = vec![Instr::Label { id: start }];
-    code.extend(gen_value(cond, g, l));
-
-    code.push(Instr::JumpUnless { id: leave });
-    code.extend(gen_value(body, g, l));
-    code.push(Instr::Drop { tpe: Type::from(&body_t) });
-    code.push(Instr::JumpAlways { id: start });
-    code.push(Instr::Label { id: leave });
-    code.push(Instr::NewTuple { fields: vec![] });
-    code
+    vec![
+        Instr::Block { id, inner: cat!(
+            gen_value(cond, g, l),
+            [Instr::CondBlock { id }],
+            gen_value(body, g, l),
+            [Instr::Drop { tpe }],
+            [Instr::RepeatBlock { id }]
+        ) },
+        Instr::NewTuple { fields: vec![] }
+    ]
 }
 
 fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let leave = g.new_label();
-    let start = g.new_label();
+    let id = g.new_label();
 
     let arr_t = Type::from(&expr.tpe());
     let val_t = arr_t.array_item();
@@ -238,38 +243,37 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
     let val_id = l.define(value, val_t.clone());
     let expr_id = l.alloc(arr_t.clone());
 
-    // Init
-    let mut code = gen_value(expr, g, l);
-    code.push(Instr::SetLocal { id: expr_id, tpe: arr_t.clone() });
-    code.push(Instr::PushInt { value: 0 });
-    code.push(Instr::SetLocal { id: key_id, tpe: Type::Int });
+    cat!(
+        // Init
+        gen_value(expr, g, l),
+        [Instr::SetLocal { id: expr_id, tpe: arr_t.clone() }],
+        [Instr::PushInt { value: 0 }],
+        [Instr::SetLocal { id: key_id, tpe: Type::Int }],
+        [Instr::Block { id, inner: cat!(
+            // Cond
+            [Instr::GetLocal { id: key_id, tpe: Type::Int }],
+            [Instr::GetLocal { id: expr_id, tpe: arr_t.clone() }],
+            [Instr::LenArray { item: val_t.clone() }],
+            [Instr::LtInt],
+            [Instr::CondBlock { id }],
 
-    // Cond
-    code.push(Instr::Label { id: start });
-    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
-    code.push(Instr::GetLocal { id: expr_id, tpe: arr_t.clone() });
-    code.push(Instr::LenArray { item: val_t.clone() });
-    code.push(Instr::LtInt);
-    code.push(Instr::JumpUnless { id: leave });
+            // Get array[i]
+            [Instr::GetLocal { id: expr_id, tpe: arr_t.clone() }],
+            [Instr::GetLocal { id: key_id, tpe: Type::Int }],
+            [Instr::GetArray { item: val_t.clone() }],
+            [Instr::SetLocal { id: val_id, tpe: val_t.clone() }],
 
-    // Get array[i]
-    code.push(Instr::GetLocal { id: expr_id, tpe: arr_t.clone() });
-    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
-    code.push(Instr::GetArray { item: val_t.clone() });
-    code.push(Instr::SetLocal { id: val_id, tpe: val_t.clone() });
+            // Body
+            gen_value(body, g, l),
 
-    // Block
-    code.extend(gen_value(body, g, l));
-
-    // Increment
-    code.push(Instr::GetLocal { id: key_id, tpe: Type::Int });
-    code.push(Instr::PushInt { value: 1 });
-    code.push(Instr::AddInt);
-    code.push(Instr::SetLocal { id: key_id, tpe: Type::Int });
-
-    // End
-    code.push(Instr::Label { id: leave });
-    code
+            // Increment
+            [Instr::GetLocal { id: key_id, tpe: Type::Int }],
+            [Instr::PushInt { value: 1 }],
+            [Instr::AddInt],
+            [Instr::SetLocal { id: key_id, tpe: Type::Int }],
+            [Instr::RepeatBlock { id }]
+        ) }]
+    )
 }
 
 fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
@@ -293,16 +297,17 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
         capture_types.push(tpe);
     }
 
-    let body_t = body.tpe();
-    let mut code = gen_value(body, g, &mut inner);
+    let tpe = Type::from(&body.tpe());
+    let code = cat!(
+        gen_value(body, g, &mut inner),
+        if ret == void() {
+            vec![Instr::Drop { tpe }, Instr::NewTuple { fields: vec![] }]
+        } else {
+            vec![]
+        }
+    );
 
-    if ret == void() && body_t != void() {
-        code.push(Instr::Drop { tpe: Type::from(&body_t) });
-        code.push(Instr::NewTuple { fields: vec![] });
-    }
-
-    let mut inner_args = arg_types.clone();
-    inner_args.extend(capture_types.clone());
+    let inner_args = cat!(arg_types.clone(), capture_types.clone());
     let func = Func { code, args: inner_args, ret: Type::from(&ret) };
 
     vec![Instr::BindFunc {
@@ -334,10 +339,11 @@ fn first3(args: Vec<Value>) -> (Value, Value, Value) {
 
 fn gen_binary_op(op: Instr, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
     let (lhs, rhs) = first2(args);
-    let mut code = gen_value(lhs, g, l);
-    code.extend(gen_value(rhs, g, l));
-    code.push(op);
-    code
+    cat!(
+        gen_value(lhs, g, l),
+        gen_value(rhs, g, l),
+        [op]
+    )
 }
 
 fn cmp_instr(op: &str, t: &frontend::Type) -> Instr {
@@ -362,10 +368,7 @@ fn gen_cmp(op: &str, t: &frontend::Type, mut args: Vec<Value>, g: &mut Globals, 
         "<=" => (args.reverse(), cmp_instr("<", t), vec![Instr::NotBool]),
         _ => unreachable!(),
     };
-
-    let mut code = gen_binary_op(instr, args, g, l);
-    code.extend(not);
-    code
+    cat!(gen_binary_op(instr, args, g, l), not)
 }
 
 fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
@@ -439,80 +442,59 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
                 tpe: Bool
             }, g, l)
         }
-        ("==", [Bool, Bool]) => {
-            let mut code = gen_binary_op(Instr::XorBool, args, g, l);
-            code.push(Instr::NotBool);
-            code
-        }
+        ("==", [Bool, Bool]) => cat!(
+            gen_binary_op(Instr::XorBool, args, g, l), [Instr::NotBool]
+        ),
         ("==" | "!=" | "<" | "<=" | ">" | ">=", [t, _]) => {
             gen_cmp(&op, t, args, g, l)
         }
         ("int", [Int]) | ("real", [Real]) | ("bool", [Bool]) | ("text", [Text]) => {
             gen_value(first(args), g, l)
         }
-        ("int", [Bool]) => {
-            let value = Value::If {
-                cond: Box::new(first(args)),
-                then: Box::new(Value::Bool { value: true, tpe: Bool }),
-                elsë: Box::new(Value::Bool { value: true, tpe: Bool }),
-                tpe: Bool
-            };
-            gen_value(value, g, l)
-        }
-        ("int", [Real]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::RealToInt);
-            code
-        }
-        ("real", [Int]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::IntToReal);
-            code
-        }
-        ("bool", [Int]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::PushInt { value: 0 });
-            code.push(Instr::EqInt);
-            code.push(Instr::NotBool);
-            code
-        }
-        ("not", [Int]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::NotInt);
-            code
-        }
-        ("not", [Bool]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::NotBool);
-            code
-        }
-        ("chr", [Int]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::IntToTextAscii);
-            code
-        }
-        ("print", [Text]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::PrintText);
-            code
-        }
+        ("int", [Bool]) => gen_value(Value::If {
+            cond: Box::new(first(args)),
+            then: Box::new(Value::Bool { value: true, tpe: Bool }),
+            elsë: Box::new(Value::Bool { value: true, tpe: Bool }),
+            tpe: Bool
+        }, g, l),
+        ("int", [Real]) => cat!(
+            gen_value(first(args), g, l), [Instr::RealToInt]
+        ),
+        ("real", [Int]) => cat!(
+            gen_value(first(args), g, l), [Instr::IntToReal]
+        ),
+        ("bool", [Int]) => cat!(
+            gen_value(first(args), g, l),
+            [Instr::PushInt { value: 0 }],
+            [Instr::EqInt],
+            [Instr::NotBool]
+        ),
+        ("not", [Int]) => cat!(
+            gen_value(first(args), g, l), [Instr::NotInt]
+        ),
+        ("not", [Bool]) => cat!(
+            gen_value(first(args), g, l), [Instr::NotBool]
+        ),
+        ("chr", [Int]) => cat!(
+            gen_value(first(args), g, l), [Instr::IntToTextAscii]
+        ),
+        ("print", [Text]) => cat!(
+            gen_value(first(args), g, l), [Instr::PrintText]
+        ),
         ("array", [Int]) => {
             let item_t = Type::from(&tpe).array_item();
-
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::NewArray { item: item_t });
-            code
+            cat!(
+                gen_value(first(args), g, l),
+                [Instr::NewArray { item: item_t }]
+            )
         }
-        ("len", [Text]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::LenText);
-            code
-        }
-        ("len", [Array { item }]) => {
-            let mut code = gen_value(first(args), g, l);
-            code.push(Instr::LenArray { item: Type::from(item) });
-            code
-        }
+        ("len", [Text]) => cat!(
+            gen_value(first(args), g, l), [Instr::LenText]
+        ),
+        ("len", [Array { item }]) => cat!(
+            gen_value(first(args), g, l),
+            [Instr::LenArray { item: Type::from(item) }]
+        ),
         ("get", [Text, Int]) => {
             gen_binary_op(Instr::GetText, args, g, l)
         }
@@ -522,12 +504,12 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         }
         ("set", [Array { item }, Int, _]) => {
             let (array, idx, val) = first3(args);
-
-            let mut code = gen_value(array, g, l);
-            code.extend(gen_value(idx, g, l));
-            code.extend(gen_value(val, g, l));
-            code.push(Instr::SetArray { item: Type::from(&item) });
-            code
+            cat!(
+                gen_value(array, g, l),
+                gen_value(idx, g, l),
+                gen_value(val, g, l),
+                [Instr::SetArray { item: Type::from(&item) }]
+            )
         }
         _ => unreachable!()
     }

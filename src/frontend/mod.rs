@@ -10,7 +10,7 @@ mod typecheck;
 use std::collections::HashMap;
 
 pub use filesystem::{FS, system_fs, playground_fs};
-pub use error::{Error, Fallible, err};
+pub use error::{Error, Fallible};
 pub use builtin::{Type, void};
 pub use typecheck::Value;
 
