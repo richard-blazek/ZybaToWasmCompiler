@@ -15,7 +15,58 @@ fn type_to_str(tpe: &Type) -> &str {
 }
 
 fn gen_instr(s: &mut String, instr: Instr) {
-
+    match instr {
+        Instr::PushInt { value } => todo!(),
+        Instr::PushReal { value } => todo!(),
+        Instr::PushText { value } => todo!(),
+        Instr::PushBool { value } => todo!(),
+        Instr::Drop { tpe } => todo!(),
+        Instr::Label { id } => todo!(),
+        Instr::JumpAlways { id } => todo!(),
+        Instr::JumpUnless { id } => todo!(),
+        Instr::NewTuple { fields } => todo!(),
+        Instr::GetField { fields, i } => todo!(),
+        Instr::SetField { fields, i } => todo!(),
+        Instr::GetLocal { id, tpe } => todo!(),
+        Instr::SetLocal { id, tpe } => todo!(),
+        Instr::CallFunc { args, ret } => todo!(),
+        Instr::BindFunc { id, args, ret, capture } => todo!(),
+        Instr::RealToInt => todo!(),
+        Instr::IntToReal => todo!(),
+        Instr::IntToTextAscii => todo!(),
+        Instr::NotInt => todo!(),
+        Instr::NotBool => todo!(),
+        Instr::PrintText => todo!(),
+        Instr::NewArray { item } => todo!(),
+        Instr::LenArray { item } => todo!(),
+        Instr::GetArray { item } => todo!(),
+        Instr::SetArray { item } => todo!(),
+        Instr::GetText => todo!(),
+        Instr::CatText => todo!(),
+        Instr::LtText => fmt!(s, "call $text_lt\n"),
+        Instr::EqText => fmt!(s, "call $text_eq\n"),
+        Instr::LenText => fmt!(s, "call $text_len\n"),
+        Instr::MulInt => fmt!(s, "i64.mul\n"),
+        Instr::MulReal => fmt!(s, "f64.add\n"),
+        Instr::DivInt => fmt!(s, "i64.div_s\n"),
+        Instr::DivReal => fmt!(s, "f64.div\n"),
+        Instr::RemInt => fmt!(s, "i64.rem_s\n"),
+        Instr::AddInt => fmt!(s, "i64.add\n"),
+        Instr::AddReal => fmt!(s, "f64.add\n"),
+        Instr::SubInt => fmt!(s, "i64.sub\n"),
+        Instr::SubReal => fmt!(s, "f64.sub\n"),
+        Instr::LtInt => fmt!(s, "i64.lt\n"),
+        Instr::EqInt => fmt!(s, "i64.eq\n"),
+        Instr::LtReal => fmt!(s, "f64.lt\n"),
+        Instr::EqReal => fmt!(s, "f64.eq\n"),
+        Instr::AndInt => fmt!(s, "i64.and\n"),
+        Instr::AndBool => fmt!(s, "i32.and\n"),
+        Instr::OrInt => fmt!(s, "i64.or\n"),
+        Instr::OrBool => fmt!(s, "i32.or\n"),
+        Instr::XorInt => fmt!(s, "i64.xor\n"),
+        Instr::XorBool => fmt!(s, "i32.xor\n"),
+        Instr::Abort => fmt!(s, "unreachable\n"),
+    }
 }
 
 fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Type) {
@@ -34,7 +85,65 @@ fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Ty
 }
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
-    fmt!(s, "(module\n");
+    fmt!(s, "(module
+(func $text_len (param $ptr i32) (result i32)
+    (local $len i32)
+    (local.set $len (i32.const 0))
+    (block $exit
+        (loop $loop
+            (i32.load8_u (local.get $ptr))
+            (br_if $exit (i32.eqz (i32.load8_u (local.get $ptr))))
+            (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
+            (local.set $len (i32.add (local.get $len) (i32.const 1)))
+            (br $loop)
+        )
+    )
+    (local.get $len)
+)
+(func $text_eq (param $a i32) (param $b i32) (result i32)
+    (local $charA i32)
+    (local $charB i32)
+
+    (block $not_equal
+      (loop $loop
+        (local.set $charA (i32.load8_u (local.get $a)))
+        (local.set $charB (i32.load8_u (local.get $b)))
+
+        (br_if $not_equal (i32.ne (local.get $charA) (local.get $charB)))
+        (br_if 1 (i32.eqz (local.get $charA)))
+
+        (local.set $a (i32.add (local.get $a) (i32.const 1)))
+        (local.set $b (i32.add (local.get $b) (i32.const 1)))
+        (br $loop)
+      )
+      (i32.const 1)
+      return
+    )
+    (i32.const 0)
+)
+(func $text_lt (param $a i32) (param $b i32) (result i32)
+    (local $charA i32)
+    (local $charB i32)
+
+    (block $gt_eq
+      (loop $loop
+        (local.set $charA (i32.load8_u (local.get $a)))
+        (local.set $charB (i32.load8_u (local.get $b)))
+
+        (br_if $gt_eq (i32.ge_u (local.get $charA) (local.get $charB)))
+        (br_if 1 (i32.eqz (local.get $charA)))
+
+        (local.set $a (i32.add (local.get $a) (i32.const 1)))
+        (local.set $b (i32.add (local.get $b) (i32.const 1)))
+        (br $loop)
+      )
+      (i32.const 1)
+      return
+    )
+    (i32.const 0)
+)
+\n");
+
     fmt!(s, "(table $table {} funcref)\n", funcs.len());
 
     for (i, func) in funcs.into_iter().enumerate() {
