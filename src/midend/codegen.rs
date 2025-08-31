@@ -303,7 +303,7 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
 
     let mut inner_args = arg_types.clone();
     inner_args.extend(capture_types.clone());
-    let func = Func::new(code, inner_args);
+    let func = Func { code, args: inner_args, ret: Type::from(&ret) };
 
     vec![Instr::BindFunc {
         id: g.add_lambda(func),
@@ -572,7 +572,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
 
     for (name, value) in globals {
         match value {
-            Value::Lambda { args, body, .. } => {
+            Value::Lambda { args, body, ret, .. } => {
                 let mut l = Locals::new();
                 let mut arg_types = vec![];
 
@@ -582,8 +582,11 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
                     arg_types.push(tpe);
                 }
 
-                let code = gen_value(*body, &mut g, &mut l);
-                let func = Func::new(code, arg_types);
+                let func = Func {
+                    code: gen_value(*body, &mut g, &mut l),
+                    args: arg_types,
+                    ret: Type::from(&ret)
+                };
                 g.set_func(g.func_id(&name), func);
             }
             _ => {}
@@ -591,5 +594,5 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
     }
 
     let main_id = g.func_id(main_name);
-    Program::new(g.to_funcs(), main_id)
+    Program { funcs: g.to_funcs(), entry: main_id }
 }

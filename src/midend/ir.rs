@@ -170,40 +170,13 @@ pub enum Instr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Func {
-    code: Vec<Instr>,
-    args: Vec<Type>
-}
-
-impl Func {
-    pub fn new(code: Vec<Instr>, args: Vec<Type>) -> Func {
-        Func { code, args }
-    }
-
-    pub fn code(&self) -> &Vec<Instr> {
-        &self.code
-    }
-
-    pub fn args(&self) -> &Vec<Type> {
-        &self.args
-    }
+    pub code: Vec<Instr>,
+    pub args: Vec<Type>,
+    pub ret: Type
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    funcs: Vec<Func>,
-    entry: usize
-}
-
-impl Program {
-    pub fn new(funcs: Vec<Func>, entry: usize) -> Program {
-        Program { funcs, entry }
-    }
-
-    pub fn funcs(&self) -> &Vec<Func> {
-        &self.funcs
-    }
-
-    pub fn entry(&self) -> usize {
-        self.entry
-    }
+    pub funcs: Vec<Func>,
+    pub entry: usize
 }

@@ -84,14 +84,13 @@ fn main() {
     }
 
     let program = midend::codegen(&main_fn, decls);
-    let entry_i = program.entry();
 
-    for (i, func) in program.funcs().iter().enumerate() {
-        println!("Func #{} - args taken: {:?}", i, func.args());
-        for (i, instr) in func.code().iter().enumerate() {
+    for (i, func) in program.funcs.iter().enumerate() {
+        println!("Func #{} - args taken: {:?}", i, func.args);
+        for (i, instr) in func.code.iter().enumerate() {
             println!("{}| {:?}", i, instr)
         }
     }
 
-    println!("Main: #{}", entry_i);
+    println!("Main: #{}", program.entry);
 }
