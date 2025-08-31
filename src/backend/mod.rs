@@ -1,3 +1,3 @@
-mod codegen;
+mod wasmgen;
 
-pub use codegen::*;
+pub use wasmgen::*;
