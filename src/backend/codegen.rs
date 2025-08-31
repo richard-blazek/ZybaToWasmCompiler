@@ -14,34 +14,38 @@ fn type_to_str(tpe: &Type) -> &str {
     }
 }
 
+fn gen_text_literal(s: &mut String, text: String) {
+    todo!()
+}
+
 fn gen_instr(s: &mut String, instr: Instr) {
     match instr {
-        Instr::PushInt { value } => todo!(),
-        Instr::PushReal { value } => todo!(),
-        Instr::PushText { value } => todo!(),
-        Instr::PushBool { value } => todo!(),
-        Instr::Drop { tpe } => todo!(),
+        Instr::PushInt { value } => fmt!(s, "i64.const {}\n", value),
+        Instr::PushReal { value } => fmt!(s, "f64.const {}\n", value),
+        Instr::PushText { value } => gen_text_literal(s, value),
+        Instr::PushBool { value } => fmt!(s, "i32.const {}\n", value as i32),
+        Instr::Drop { .. } => fmt!(s, "drop\n"),
         Instr::Label { id } => todo!(),
         Instr::JumpAlways { id } => todo!(),
         Instr::JumpUnless { id } => todo!(),
         Instr::NewTuple { fields } => todo!(),
         Instr::GetField { fields, i } => todo!(),
         Instr::SetField { fields, i } => todo!(),
-        Instr::GetLocal { id, tpe } => todo!(),
-        Instr::SetLocal { id, tpe } => todo!(),
+        Instr::GetLocal { id, .. } => fmt!(s, "local.get {}\n", id),
+        Instr::SetLocal { id, .. } => fmt!(s, "local.set {}\n", id),
         Instr::CallFunc { args, ret } => todo!(),
         Instr::BindFunc { id, args, ret, capture } => todo!(),
-        Instr::RealToInt => todo!(),
-        Instr::IntToReal => todo!(),
+        Instr::RealToInt => fmt!(s, "i64.trunc_f64_s\n"),
+        Instr::IntToReal => fmt!(s, "f64.convert_i64_s\n"),
         Instr::IntToTextAscii => todo!(),
-        Instr::NotInt => todo!(),
-        Instr::NotBool => todo!(),
+        Instr::NotInt => fmt!(s, "i64.const -1\ni64.xor\n"),
+        Instr::NotBool => fmt!(s, "i32.eqz\n"),
         Instr::PrintText => todo!(),
         Instr::NewArray { item } => todo!(),
         Instr::LenArray { item } => todo!(),
         Instr::GetArray { item } => todo!(),
         Instr::SetArray { item } => todo!(),
-        Instr::GetText => todo!(),
+        Instr::GetText => fmt!(s, "i32.wrap_i64\ni32.add\ni64.load8_u\n"),
         Instr::CatText => todo!(),
         Instr::LtText => fmt!(s, "call $text_lt\n"),
         Instr::EqText => fmt!(s, "call $text_eq\n"),
@@ -86,15 +90,15 @@ fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Ty
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     fmt!(s, "(module
-(func $text_len (param $ptr i32) (result i32)
-    (local $len i32)
-    (local.set $len (i32.const 0))
+(func $text_len (param $ptr i32) (result i64)
+    (local $len i64)
+    (local.set $len (i64.const 0))
     (block $exit
         (loop $loop
             (i32.load8_u (local.get $ptr))
             (br_if $exit (i32.eqz (i32.load8_u (local.get $ptr))))
             (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
-            (local.set $len (i32.add (local.get $len) (i32.const 1)))
+            (local.set $len (i64.add (local.get $len) (i64.const 1)))
             (br $loop)
         )
     )
