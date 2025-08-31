@@ -68,30 +68,38 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::IntToTextAscii => {
             todo!()
         }
-        Instr::NotInt => fmt!(s, "(i64.const -1)(i64.xor)"),
+        Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
         Instr::NotBool => fmt!(s, "(i32.eqz)"),
         Instr::PrintText => {
             todo!()
         }
         Instr::NewArray { item } => {
-            todo!()
+            fmt!(s, "(global.set $handy1 (i32.wrap_i64))");
+            fmt!(s, "(global.set $handy2 (call $malloc (i32.add (i32.mul (global.get $handy1) (i32.const 8)) (i32.const 1))))");
+            fmt!(s, "(i64.store (i64.extend_i32_s (global.get $handy1)) (global.get $handy2))");
         }
         Instr::LenArray { item } => {
-            todo!()
+            fmt!(s, "(i64.store)");
         }
         Instr::GetArray { item } => {
-            todo!()
+            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 1))");
+            fmt!(s, "(i32.add)");
+            fmt!(s, "({}.load)", type_to_str(&item));
         }
         Instr::SetArray { item } => {
-            todo!()
+            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 1))");
+            fmt!(s, "(i32.add)");
+            fmt!(s, "({}.store)", type_to_str(&item));
         }
-        Instr::GetText => fmt!(s, "(i32.wrap_i64)(i32.add)(i64.load8_u)"),
-        Instr::CatText => {
-            todo!()
+        Instr::GetText => {
+            fmt!(s, "(i32.wrap_i64)");
+            fmt!(s, "(i32.add)");
+            fmt!(s, "(i64.load8_u)");
         }
-        Instr::LtText => fmt!(s, "(call $text_lt)"),
-        Instr::EqText => fmt!(s, "(call $text_eq)"),
-        Instr::LenText => fmt!(s, "(call $text_len)"),
+        Instr::CatText => fmt!(s, "(call $strcat)"),
+        Instr::LtText => fmt!(s, "(call $strcmp_lt)"),
+        Instr::EqText => fmt!(s, "(call $strcmp_eq)"),
+        Instr::LenText => fmt!(s, "(call $strlen)"),
         Instr::MulInt => fmt!(s, "(i64.mul)"),
         Instr::MulReal => fmt!(s, "(f64.add)"),
         Instr::DivInt => fmt!(s, "(i64.div_s)"),
@@ -135,7 +143,7 @@ fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Ty
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     fmt!(s, "(module
-(func $text_len (param $ptr i32) (result i64)
+(func $strlen (param $ptr i32) (result i64)
   (local $len i64)
   (local.set $len (i64.const 0))
   (block $exit
@@ -146,7 +154,7 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
         (local.set $len (i64.add (local.get $len) (i64.const 1)))
         (br $loop)))
   (local.get $len))
-(func $text_eq (param $a i32) (param $b i32) (result i32)
+(func $strcmp_eq (param $a i32) (param $b i32) (result i32)
   (local $charA i32)
   (local $charB i32)
 
@@ -164,7 +172,7 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     (i32.const 1)
     return)
   (i32.const 0))
-(func $text_lt (param $a i32) (param $b i32) (result i32)
+(func $strcmp_lt (param $a i32) (param $b i32) (result i32)
   (local $charA i32)
   (local $charB i32)
 
@@ -220,7 +228,46 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     (global.set $heap_ptr (local.get $new_end))
     (local.get $old_base))
 
-(global $handy1 (mut i32) (i32.const 0))");
+  (func $strcat (param $a i32) (param $b i32) (result i32)
+    (local $lenA i32)
+    (local $lenB i32)
+    (local $total i32)
+    (local $dst i32)
+    (local $i i32)
+
+    (local.set $lenA (call $strlen (local.get $a)))
+    (local.set $lenB (call $strlen (local.get $b)))
+    (local.set $total (i32.add (i32.add (local.get $lenA) (local.get $lenB)) (i32.const 1)))
+    (local.set $dst (call $malloc (local.get $total)))
+
+    (local.set $i (i32.const 0))
+    (block $copy_a_done
+      (loop $copy_a
+        (br_if $copy_a_done (i32.ge_u (local.get $i) (local.get $lenA)))
+        (i32.store8
+          (i32.add (local.get $dst) (local.get $i))
+          (i32.load8_u (i32.add (local.get $a) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $copy_a)))
+
+    (local.set $i (i32.const 0))
+    (block $copy_b_done
+      (loop $copy_b
+        (br_if $copy_b_done (i32.ge_u (local.get $i) (local.get $lenB)))
+        (i32.store8
+          (i32.add (local.get $dst) (i32.add (local.get $lenA) (local.get $i)))
+          (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $copy_b)))
+
+    (i32.store8
+      (i32.add (local.get $dst) (i32.add (local.get $lenA) (local.get $lenB)))
+      (i32.const 0))
+    (local.get $dst))
+
+(global $handy1 (mut i32) (i32.const 0))
+(global $handy2 (mut i32) (i32.const 0))
+");
 
     fmt!(s, "(table $table {} funcref)", funcs.len());
 
