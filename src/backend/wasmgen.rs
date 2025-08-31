@@ -34,25 +34,49 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::RepeatBlock { id } => fmt!(s, "br $loop_{}\n", id),
         Instr::QuitBlock { id } => fmt!(s, "br $block_{}\n", id),
         Instr::CondBlock { id } => fmt!(s, "i32.eqz\nbr_if $block_{}\n", id),
-        Instr::NewTuple { fields } => todo!(),
-        Instr::GetField { fields, i } => todo!(),
-        Instr::SetField { fields, i } => todo!(),
+        Instr::NewTuple { fields } => {
+            todo!()
+        }
+        Instr::GetField { fields, i } => {
+            todo!()
+        }
+        Instr::SetField { fields, i } => {
+            todo!()
+        }
         Instr::GetLocal { id, .. } => fmt!(s, "local.get {}\n", id),
         Instr::SetLocal { id, .. } => fmt!(s, "local.set {}\n", id),
-        Instr::CallFunc { args, ret } => todo!(),
-        Instr::BindFunc { id, args, ret, capture } => todo!(),
+        Instr::CallFunc { args, ret } => {
+            todo!()
+        }
+        Instr::BindFunc { id, args, ret, capture } => {
+            todo!()
+        }
         Instr::RealToInt => fmt!(s, "i64.trunc_f64_s\n"),
         Instr::IntToReal => fmt!(s, "f64.convert_i64_s\n"),
-        Instr::IntToTextAscii => todo!(),
+        Instr::IntToTextAscii => {
+            todo!()
+        }
         Instr::NotInt => fmt!(s, "i64.const -1\ni64.xor\n"),
         Instr::NotBool => fmt!(s, "i32.eqz\n"),
-        Instr::PrintText => todo!(),
-        Instr::NewArray { item } => todo!(),
-        Instr::LenArray { item } => todo!(),
-        Instr::GetArray { item } => todo!(),
-        Instr::SetArray { item } => todo!(),
+        Instr::PrintText => {
+            todo!()
+        }
+        Instr::NewArray { item } => {
+            todo!()
+        }
+        Instr::LenArray { item } => {
+            todo!()
+        }
+        Instr::GetArray { item } => {
+            todo!()
+        }
+        Instr::SetArray { item } => {
+            todo!()
+        }
         Instr::GetText => fmt!(s, "i32.wrap_i64\ni32.add\ni64.load8_u\n"),
-        Instr::CatText => todo!(),
+        Instr::CatText => {
+            todo!()
+        }
         Instr::LtText => fmt!(s, "call $text_lt\n"),
         Instr::EqText => fmt!(s, "call $text_eq\n"),
         Instr::LenText => fmt!(s, "call $text_len\n"),
@@ -154,6 +178,45 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
       return
     )
     (i32.const 0)
+)
+
+(memory $mem 1)
+(global $heap_ptr (mut i32) (i32.const 0))
+
+(func $malloc (param $sz i64) (result i32)
+    (local $size i32)
+    (local $old_base i32)
+    (local $new_end i32)
+    (local $need_pages i32)
+
+    (if (i64.eqz (local.get $sz))
+      (then
+        (local.set $size (i32.const 1)))
+      (else
+        (local.set $size (i32.wrap_i64 (local.get $sz)))))
+
+    ;; Align up to 8 bytes: (size + 7) & ~7
+    (local.set $size (i32.and (i32.add (local.get $size) (i32.const 7)) (i32.const -8)))
+
+    (if (i32.eqz (global.get $heap_ptr))
+      (then
+        ;; heap_base = memory.size << 16  (pages -> bytes)
+        (global.set $heap_ptr (i32.shl (memory.size) (i32.const 16)))))
+
+    (local.set $old_base (globals.get $heap_ptr))
+    (local.set $new_end (i32.add (local.get $old_base) (local.get $size)))
+    (local.set $need (i32.shr_u (i32.add (local.get $new_end) (i32.const 65535)) (i32.const 16)))
+    (local.set $need (i32.sub (local.get $need) (memory.size)))
+
+    (if (i32.gt_s (local.get $need) (i32.const 0))
+      (then
+        ;; memory.grow returns -1 on failure
+        (if (i32.eq (memory.grow (local.get $need)) (i32.const -1))
+          (then
+            (unreachable)))))
+
+    (global.set $heap_ptr (local.get $new_end))
+    (local.get $old_base)
 )
 \n");
 
