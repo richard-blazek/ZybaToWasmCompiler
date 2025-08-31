@@ -43,7 +43,7 @@ impl Globals {
                         id: counter,
                         args: arg_types,
                         ret: Type::from(ret),
-                        capture: vec![]
+                        captures: vec![]
                     });
                     func_ids.insert(name, counter);
                     counter += 1;

@@ -1,6 +1,6 @@
 use crate::frontend;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Int,
     Real,
@@ -102,7 +102,7 @@ pub enum Instr {
     // global function fn with id=id (different from local variable id)
     // stack before: [any, c1 of type=capture[0], .., cN of type=capture[N-1]]
     // stack after:  [any, fn stored including the captured parameters]
-    BindFunc { id: usize, args: Vec<Type>, ret: Type, capture: Vec<Type> },
+    BindFunc { id: usize, args: Vec<Type>, ret: Type, captures: Vec<(usize, Type)> },
 
     // stack before: [any, value1]
     // stack after:  [any, value2]

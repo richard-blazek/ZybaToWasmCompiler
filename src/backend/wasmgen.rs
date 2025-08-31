@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::midend::{Func, Instr, Program, Type};
 
 macro_rules! fmt {
@@ -14,6 +16,40 @@ fn type_to_str(tpe: &Type) -> &str {
     }
 }
 
+struct FnTypes {
+    map: HashMap<(Vec<String>, String), String>
+}
+
+impl FnTypes {
+    fn type_of(&mut self, args: &Vec<Type>, ret: &Type) -> String {
+        let args: Vec<_> = args.iter().map(|arg| type_to_str(arg).to_string()).collect();
+        let ret = type_to_str(ret).to_string();
+
+        if let Some(typename) = self.map.get(&(args.clone(), ret.clone())) {
+            typename.clone()
+        } else {
+            let idx = format!("fn_type_{}", self.map.len());
+            self.map.insert((args, ret), idx.clone());
+            idx
+        }
+    }
+
+    fn gen_signatures(&self, s: &mut String) {
+        for ((args, ret), typename) in self.map.iter() {
+            fmt!(s, "(type ${} (func ", typename);
+            if !args.is_empty() {
+                fmt!(s, "(param");
+                for arg in args {
+                    fmt!(s, " {}", arg);
+                }
+                fmt!(s, ") ");
+            }
+            fmt!(s, "(result {})", ret);
+            fmt!(s, "))");
+        }
+    }
+}
+
 fn gen_text_literal(s: &mut String, text: String) {
     let mut bytes = text.into_bytes();
     bytes.resize(bytes.len() + (4 - bytes.len() % 4), 0);
@@ -25,7 +61,7 @@ fn gen_text_literal(s: &mut String, text: String) {
     fmt!(s, "(global.get $handy1)");
 }
 
-fn gen_instr(s: &mut String, instr: Instr) {
+fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
     match instr {
         Instr::PushInt { value } => fmt!(s, "(i64.const {})", value),
         Instr::PushReal { value } => fmt!(s, "(f64.const {})", value),
@@ -35,7 +71,7 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::Block { id, inner } => {
             fmt!(s, "(block $block_{} ", id);
             fmt!(s, "(loop $loop_{} ", id);
-            gen_instrs(s, inner);
+            gen_instrs(s, fn_types, inner);
             fmt!(s, "))");
         }
         Instr::RepeatBlock { id } => fmt!(s, "(br $loop_{})", id),
@@ -58,10 +94,23 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
         Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),
         Instr::CallFunc { args, ret } => {
-            todo!()
+            fmt!(s, "(global.tee $handy1)");
+            fmt!(s, "(global.set $capture_ptr (i32.add (i32.const 1)))");
+            fmt!(s, "(i32.load (global.get $handy1))");
+
+            fmt!(s, "(call_indirect (type ${}))", fn_types.type_of(&args, &ret));
         }
-        Instr::BindFunc { id, args, ret, capture } => {
-            todo!()
+        Instr::BindFunc { id, captures, .. } => {
+            fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", (captures.len() + 2) * 8);
+            fmt!(s, "(i32.store (i32.const {}) (global.get $handy1))", id);
+            fmt!(s, "(i64.store (i64.const {}) (global.get $handy1) offset=8)", captures.len());
+            for (i, (loc_id, tpe)) in captures.into_iter().enumerate() {
+                fmt!(s, "(global.get $handy1)");
+                fmt!(s, "(local.get {})", loc_id);
+                fmt!(s, "(global.get $handy1)");
+                fmt!(s, "({}.store offset={})", type_to_str(&tpe), 16 + i * 8);
+            }
+            fmt!(s, "(global.get $handy1)");
         }
         Instr::RealToInt => fmt!(s, "(i64.trunc_f64_s)"),
         Instr::IntToReal => fmt!(s, "(f64.convert_i64_s)"),
@@ -79,12 +128,12 @@ fn gen_instr(s: &mut String, instr: Instr) {
             fmt!(s, "(call $strlen (global.get $handy1))");
             fmt!(s, "(call $puts)");
         }
-        Instr::NewArray { item } => {
+        Instr::NewArray { item: _item } => {
             fmt!(s, "(global.set $handy1 (i32.wrap_i64))");
             fmt!(s, "(global.set $handy2 (call $malloc (i32.add (i32.mul (global.get $handy1) (i32.const 8)) (i32.const 1))))");
             fmt!(s, "(i64.store (i64.extend_i32_s (global.get $handy1)) (global.get $handy2))");
         }
-        Instr::LenArray { item } => {
+        Instr::LenArray { item: _item } => {
             fmt!(s, "(i64.store)");
         }
         Instr::GetArray { item } => {
@@ -129,22 +178,28 @@ fn gen_instr(s: &mut String, instr: Instr) {
     }
 }
 
-fn gen_instrs(s: &mut String, instrs: Vec<Instr>) {
+fn gen_instrs(s: &mut String, fn_types: &mut FnTypes, instrs: Vec<Instr>) {
     for instr in instrs {
-        gen_instr(s, instr);
+        gen_instr(s, fn_types, instr);
     }
 }
 
-fn gen_func(s: &mut String, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Type) {
-    fmt!(s, "(func $func_{} (param", i);
-    for arg in &args {
-        fmt!(s, " {}", type_to_str(arg));
+fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, code: Vec<Instr>, args: Vec<Type>, ret: Type) {
+    fmt!(s, "(func $func_{} ", i);
+
+    if !args.is_empty() {
+        fmt!(s, "(param");
+        for arg in &args {
+            fmt!(s, " {}", type_to_str(arg));
+        }
+        fmt!(s, ") ");
     }
-    fmt!(s, " i32) (result {})", type_to_str(&ret));
-    gen_instrs(s, code);
+    fmt!(s, "(result {})", type_to_str(&ret));
+
+    gen_instrs(s, fn_types, code);
     fmt!(s, ")");
 
-    fmt!(s, "elem (i32.const {}) $func_{})", i, i);
+    fmt!(s, "(elem (i32.const {}) $func_{})", i, i);
 }
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
@@ -275,13 +330,17 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
 
 (global $handy1 (mut i32) (i32.const 0))
 (global $handy2 (mut i32) (i32.const 0))
+(global $capture_ptr (mut i32) (i32.const 0))
 ");
 
     fmt!(s, "(table $table {} funcref)", funcs.len());
 
+    let mut fn_types = FnTypes { map: HashMap::new() };
     for (i, func) in funcs.into_iter().enumerate() {
-        gen_func(s, i, func.code, func.args, func.ret);
+        gen_func(s, &mut fn_types, i, func.code, func.args, func.ret);
     }
+
+    fn_types.gen_signatures(s);
 
     fmt!(s, "(start $func_{})", entry);
     fmt!(s, ")");

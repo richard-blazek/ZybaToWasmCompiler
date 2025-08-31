@@ -283,38 +283,39 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
 
     let mut inner = Locals::new();
 
-    let mut arg_types = vec![];
-    for (name, tpe) in args {
+    let args = args.into_iter().map(|(name, tpe)| {
         let tpe = Type::from(&tpe);
         inner.define(name, tpe.clone());
-        arg_types.push(tpe.clone());
-    }
+        tpe
+    }).collect::<Vec<_>>();
 
-    let mut capture_types = vec![];
-    for name in captures {
+    let captures = captures.into_iter().map(|name| {
         let tpe = l.get_type(&name);
+        let id = l.get_id(&name);
         inner.define(name, tpe.clone());
-        capture_types.push(tpe);
-    }
+        (id, tpe)
+    }).collect::<Vec<_>>();
 
     let tpe = Type::from(&body.tpe());
-    let code = cat!(
-        gen_value(body, g, &mut inner),
-        if ret == void() {
-            vec![Instr::Drop { tpe }, Instr::NewTuple { fields: vec![] }]
-        } else {
-            vec![]
-        }
-    );
-
-    let inner_args = cat!(arg_types.clone(), capture_types.clone());
-    let func = Func { code, args: inner_args, ret: Type::from(&ret) };
+    let ret_t = Type::from(&ret);
+    let func = Func {
+        code: cat!(
+            gen_value(body, g, &mut inner),
+            if ret == void() {
+                vec![Instr::Drop { tpe }, Instr::NewTuple { fields: vec![] }]
+            } else {
+                vec![]
+            }
+        ),
+        args: args.clone(),
+        ret: ret_t.clone()
+    };
 
     vec![Instr::BindFunc {
         id: g.add_lambda(func),
-        args: arg_types,
-        ret: Type::from(&ret),
-        capture: capture_types
+        args,
+        ret: ret_t.clone(),
+        captures
     }]
 }
 
