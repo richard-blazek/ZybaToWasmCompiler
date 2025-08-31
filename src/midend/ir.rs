@@ -171,20 +171,20 @@ pub enum Instr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Func {
     code: Vec<Instr>,
-    locals: Vec<Type>
+    args: Vec<Type>
 }
 
 impl Func {
-    pub fn new(code: Vec<Instr>, locals: Vec<Type>) -> Func {
-        Func { code, locals }
+    pub fn new(code: Vec<Instr>, args: Vec<Type>) -> Func {
+        Func { code, args }
     }
 
     pub fn code(&self) -> &Vec<Instr> {
         &self.code
     }
 
-    pub fn locals(&self) -> &Vec<Type> {
-        &self.locals
+    pub fn args(&self) -> &Vec<Type> {
+        &self.args
     }
 }
 

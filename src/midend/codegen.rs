@@ -278,36 +278,35 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
     }).collect(), g);
 
     let mut inner = Locals::new();
-    let mut code = vec![];
-
-    let mut capture_types = vec![];
-    for capture in captures {
-        let tpe = l.get_type(&capture);
-        let id = inner.define(capture, tpe.clone());
-
-        capture_types.push(tpe.clone());
-        code.push(Instr::SetLocal { id, tpe });
-    }
 
     let mut arg_types = vec![];
-    for (arg, tpe) in args {
+    for (name, tpe) in args {
         let tpe = Type::from(&tpe);
-        let id = inner.define(arg, tpe.clone());
-
+        inner.define(name, tpe.clone());
         arg_types.push(tpe.clone());
-        code.push(Instr::SetLocal { id, tpe })
+    }
+
+    let mut capture_types = vec![];
+    for name in captures {
+        let tpe = l.get_type(&name);
+        inner.define(name, tpe.clone());
+        capture_types.push(tpe);
     }
 
     let body_t = body.tpe();
-    code.extend(gen_value(body, g, &mut inner));
+    let mut code = gen_value(body, g, &mut inner);
 
     if ret == void() && body_t != void() {
         code.push(Instr::Drop { tpe: Type::from(&body_t) });
         code.push(Instr::NewTuple { fields: vec![] });
     }
 
+    let mut inner_args = arg_types.clone();
+    inner_args.extend(capture_types.clone());
+    let func = Func::new(code, inner_args);
+
     vec![Instr::BindFunc {
-        id: g.add_lambda(Func::new(code, inner.get_all())),
+        id: g.add_lambda(func),
         args: arg_types,
         ret: Type::from(&ret),
         capture: capture_types
@@ -575,16 +574,16 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
         match value {
             Value::Lambda { args, body, .. } => {
                 let mut l = Locals::new();
-                let mut code = vec![];
+                let mut arg_types = vec![];
 
                 for (arg_name, arg_tpe) in args {
                     let tpe = Type::from(&arg_tpe);
-                    let id = l.define(arg_name, tpe.clone());
-                    code.push(Instr::SetLocal { id, tpe });
+                    l.define(arg_name, tpe.clone());
+                    arg_types.push(tpe);
                 }
-                code.extend(gen_value(*body, &mut g, &mut l));
 
-                let func = Func::new(code, l.get_all());
+                let code = gen_value(*body, &mut g, &mut l);
+                let func = Func::new(code, arg_types);
                 g.set_func(g.func_id(&name), func);
             }
             _ => {}

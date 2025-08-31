@@ -33,8 +33,4 @@ impl Locals {
     pub fn get_type(&self, name: &str) -> Type {
         self.get_type_by_id(self.ids[name])
     }
-
-    pub fn get_all(self) -> Vec<Type> {
-        self.types
-    }
 }

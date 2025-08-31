@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 mod frontend;
 mod midend;
+mod backend;
 
 fn main() {
     let mut files = HashMap::new();
@@ -83,11 +84,14 @@ fn main() {
     }
 
     let program = midend::codegen(&main_fn, decls);
-    let main_id = program.entry();
-    let main = &program.funcs()[main_id];
+    let entry_i = program.entry();
 
-    println!("Main (#{}) - locals used: {:?}", main_id, main.locals());
-    for (i, instr) in main.code().iter().enumerate() {
-        println!("{}: {:?}", i, instr)
+    for (i, func) in program.funcs().iter().enumerate() {
+        println!("Func #{} - args taken: {:?}", i, func.args());
+        for (i, instr) in func.code().iter().enumerate() {
+            println!("{}| {:?}", i, instr)
+        }
     }
+
+    println!("Main: #{}", entry_i);
 }
