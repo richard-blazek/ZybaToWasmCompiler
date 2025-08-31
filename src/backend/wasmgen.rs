@@ -66,7 +66,11 @@ fn gen_instr(s: &mut String, instr: Instr) {
         Instr::RealToInt => fmt!(s, "(i64.trunc_f64_s)"),
         Instr::IntToReal => fmt!(s, "(f64.convert_i64_s)"),
         Instr::IntToTextAscii => {
-            todo!()
+            fmt!(s, "(global.set $handy1 (call $malloc (i32.const 2)))");
+            fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
+            fmt!(s, "(i32.store8 (global.get $handy2) (global.get $handy1))");
+            fmt!(s, "(i32.store8 (i32.const 0) (global.get $handy1) offset=1)");
+            fmt!(s, "(global.get $handy1)");
         }
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
         Instr::NotBool => fmt!(s, "(i32.eqz)"),
