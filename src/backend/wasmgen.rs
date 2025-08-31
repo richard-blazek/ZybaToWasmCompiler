@@ -56,7 +56,7 @@ fn gen_text_literal(s: &mut String, text: String) {
 
     fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", bytes.len());
     for (i, byte) in bytes.iter().enumerate() {
-        fmt!(s, "(i32.store8 (i32.const {}) (i32.add (global.get $handy1) (i32.const {})))", byte, i);
+        fmt!(s, "(i32.store8 (i32.add (global.get $handy1) (i32.const {})) (i32.const {}))", i, byte);
     }
     fmt!(s, "(global.get $handy1)");
 }
@@ -80,8 +80,8 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::NewTuple { fields } => {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
             for i in (0..fields.len()).rev() {
-                fmt!(s, "(global.get $handy1)");
-                fmt!(s, "(i64.store offset={})", i * 8);
+                fmt!(s, "(i32.add (global.get $handy1) (i32.const {}))", i * 8);
+                fmt!(s, "(i64.store)");
             }
             fmt!(s, "(global.get $handy1)");
         }
@@ -89,7 +89,8 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             fmt!(s, "({}.load offset={})", type_to_str(&fields[i]), i * 8);
         }
         Instr::SetField { fields, i } => {
-            fmt!(s, "({}.store offset={})", type_to_str(&fields[i]), i * 8);
+            fmt!(s, "(i32.add (i32.const {}))", i * 8);
+            fmt!(s, "({}.store)", type_to_str(&fields[i]));
         }
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
         Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),
@@ -106,8 +107,8 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             for (i, (loc_id, tpe)) in captures.into_iter().enumerate() {
                 fmt!(s, "(global.get $handy1)");
                 fmt!(s, "(local.get {})", loc_id);
-                fmt!(s, "(global.get $handy1)");
-                fmt!(s, "({}.store offset={})", type_to_str(&tpe), (i + 1) * 8);
+                fmt!(s, "(i32.add (global.get $handy1) (i32.const {}))", (i + 1) * 8);
+                fmt!(s, "({}.store)", type_to_str(&tpe));
             }
             fmt!(s, "(global.get $handy1)");
         }
@@ -117,7 +118,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const 2)))");
             fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
             fmt!(s, "(i32.store8 (global.get $handy2) (global.get $handy1))");
-            fmt!(s, "(i32.store8 (i32.const 0) (global.get $handy1) offset=1)");
+            fmt!(s, "(i32.store8 (i32.const 0) (i32.add (global.get $handy1) (i32.const 1)))");
             fmt!(s, "(global.get $handy1)");
         }
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
@@ -191,9 +192,14 @@ fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
     }
     fmt!(s, "(result {})", type_to_str(&f.ret));
 
-    for (i, (loc_id, capture)) in f.captures.into_iter().enumerate() {
-        fmt!(s, "({}.load (global.get $capture_ptr) offset={})", type_to_str(&capture), i * 8);
+    for (i, (loc_id, loc_tpe)) in f.captures.into_iter().enumerate() {
+        fmt!(s, "(local {})", type_to_str(&loc_tpe));
+        fmt!(s, "({}.load (global.get $capture_ptr) offset={})", type_to_str(&loc_tpe), i * 8);
         fmt!(s, "(local.set {})", loc_id);
+    }
+
+    for loc_tpe in f.locals {
+        fmt!(s, "(local {})", type_to_str(&loc_tpe));
     }
 
     gen_instrs(s, fn_types, f.code);

@@ -68,7 +68,9 @@ fn main() {
 
     files.insert("hello.zyba".to_string(), "
     main = fun[] () {
-        print[\"Hi\"];
+        x = \"He\" + \"llo\";
+        y = chr[get[\"!\", 0]];
+        print[x + y];
     };
     
     pi = 3.142;
@@ -85,22 +87,7 @@ fn main() {
         }
     };
 
-    println!("Main function: {}", main_fn);
-    for (name, value) in decls.iter() {
-        println!("Declaration: {}", name);
-        println!("Value: {:?}", value);
-    }
-
     let program = midend::codegen(&main_fn, decls);
-
-    for (i, func) in program.funcs.iter().enumerate() {
-        println!("Func #{} - args taken: {:?}", i, func.args);
-        for (i, instr) in func.code.iter().enumerate() {
-            println!("{}| {:?}", i, instr)
-        }
-    }
-
-    println!("Main: #{}", program.entry);
-
-    println!("{}", backend::to_wasm(program));
+    let wasm = backend::to_wasm(program);
+    println!("{}", wasm);
 }

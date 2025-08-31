@@ -57,7 +57,8 @@ impl Globals {
             code: vec![],
             args: vec![],
             ret: Type::Tuple(vec![]),
-            captures: vec![]
+            captures: vec![],
+            locals: vec![]
         });
 
         Globals { instrs, funcs, func_ids, counter, labels: 0 }

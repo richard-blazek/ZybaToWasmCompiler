@@ -301,9 +301,14 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
 
     let tpe = Type::from(&body.tpe());
     let ret_t = Type::from(&ret);
+    let body = gen_value(body, g, &mut inner);
+
+    let mut locals = inner.get_types();
+    locals.drain(0..(args.len() + captures_open.len()));
+
     let func = Func {
         code: cat!(
-            gen_value(body, g, &mut inner),
+            body,
             if ret == void() {
                 vec![Instr::Drop { tpe }, Instr::NewTuple { fields: vec![] }]
             } else {
@@ -312,7 +317,8 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
         ),
         args: args.clone(),
         ret: ret_t.clone(),
-        captures: captures_open
+        captures: captures_open,
+        locals
     };
 
     vec![Instr::BindFunc {
@@ -562,6 +568,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
             Value::Lambda { args, body, ret, .. } => {
                 let mut l = Locals::new();
                 let mut arg_types = vec![];
+                let args_len = args.len();
 
                 for (arg_name, arg_tpe) in args {
                     let tpe = Type::from(&arg_tpe);
@@ -569,11 +576,16 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
                     arg_types.push(tpe);
                 }
 
+                let code = gen_value(*body, &mut g, &mut l);
+                let mut locals = l.get_types();
+                locals.drain(0..args_len);
+
                 let func = Func {
-                    code: gen_value(*body, &mut g, &mut l),
+                    code,
                     args: arg_types,
                     ret: Type::from(&ret),
-                    captures: vec![]
+                    captures: vec![],
+                    locals
                 };
                 g.set_func(g.func_id(&name), func);
             }
