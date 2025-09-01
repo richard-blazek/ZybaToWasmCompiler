@@ -138,6 +138,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::PrintText => fmt!(s, "(call $print_text)(i32.const 0)"),
         Instr::PrintReal => fmt!(s, "(call $print_real)(i32.const 0)"),
         Instr::PrintInt => fmt!(s, "(call $print_int)(i32.const 0)"),
+        Instr::PrintBool => fmt!(s, "(call $print_int (i64.extend_i32_s))(i32.const 0)"),
         Instr::NewArray { item: _item } => {
             fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
             fmt!(s, "(global.set $handy1 (call $malloc (i32.add (i32.mul (global.get $handy2) (i32.const 8)) (i32.const 1))))");

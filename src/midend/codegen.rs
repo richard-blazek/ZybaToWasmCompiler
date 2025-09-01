@@ -481,9 +481,21 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         ("chr", [Int]) => cat!(
             gen_value(first(args), g, l), [Instr::IntToTextAscii]
         ),
-        ("print", [Text]) => cat!(
-            gen_value(first(args), g, l), [Instr::PrintText]
-        ),
+        ("print", _) => {
+            args.into_iter().flat_map(|arg| {
+                let tpe = arg.tpe();
+                cat!(
+                    gen_value(arg, g, l),
+                    match tpe {
+                        Int => [Instr::PrintInt],
+                        Real => [Instr::PrintReal],
+                        Text => [Instr::PrintText],
+                        Bool => [Instr::PrintBool],
+                        _ => unreachable!()
+                    }
+                )
+            }).collect()
+        }
         ("array", [Int]) => {
             let item_t = Type::from(&tpe).array_item();
             cat!(

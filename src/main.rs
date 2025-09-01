@@ -51,31 +51,18 @@ fn main() {
 
     range = fun[n: Int] Array[Int] {
         result = array[Int, n];
-        i = 0;
-        while i < n {
+        for i, value : result {
             set[result, i, i + 1];
-            i = i + 1;
         }
         result
     };
     
     main = fun[] () {
         nums_to_120 = range[math::factorial[5]];
-        for i, num : nums_to_120 {
-            print[chr[65 + (i % 26)]];
+        for num : nums_to_120 {
+            print[num, \" \", isPrime[num], \"\\n\"];
         }
     };".to_string());
-
-    files.insert("hello.zyba".to_string(), "
-    main = fun[] () {
-        result = array[Int, 10];
-        i = 1
-        while i <= 10 {
-            print[\"Hey\"];
-            i = i + 1;
-        }
-    };
-    ".to_string());
 
     let fs: &dyn frontend::FS = &frontend::playground_fs(files);
 

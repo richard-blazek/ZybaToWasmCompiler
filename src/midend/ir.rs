@@ -116,6 +116,7 @@ pub enum Instr {
     PrintText,
     PrintReal,
     PrintInt,
+    PrintBool,
 
     // stack before: [any, len]
     // stack after:  [any, array of length=len]
