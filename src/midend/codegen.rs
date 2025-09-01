@@ -516,9 +516,9 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         ("set", [Array { item }, Int, _]) => {
             let (array, idx, val) = first3(args);
             cat!(
-                gen_value(val, g, l),
                 gen_value(array, g, l),
                 gen_value(idx, g, l),
+                gen_value(val, g, l),
                 [Instr::SetArray { item: Type::from(&item) }]
             )
         }

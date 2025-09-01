@@ -80,7 +80,7 @@ pub enum Instr {
     // stack after:  [any, fields[i]]
     GetField { fields: Vec<Type>, i: usize },
 
-    // stack before: [any, value, { fields[0], .., fields[N-1] }]
+    // stack before: [any, { fields[0], .., fields[N-1] }, value]
     // stack after:  [any]
     // fields[i] is set to value
     SetField { fields: Vec<Type>, i: usize },
@@ -129,7 +129,7 @@ pub enum Instr {
     // stack after:  [any, array[i]]
     GetArray { item: Type },
 
-    // stack before: [any, value of type=item, array, i]
+    // stack before: [any, array, i, value of type=item]
     // stack after:  [any]
     SetArray { item: Type },
 

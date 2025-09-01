@@ -89,7 +89,9 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             fmt!(s, "({}.load offset={})", type_to_str(&fields[i]), i * 8);
         }
         Instr::SetField { fields, i } => {
+            fmt!(s, "(global.set tmp{})", type_to_str(&fields[i]));
             fmt!(s, "(i32.add (i32.const {}))", i * 8);
+            fmt!(s, "(global.get tmp{})", type_to_str(&fields[i]));
             fmt!(s, "({}.store)", type_to_str(&fields[i]));
         }
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
@@ -137,8 +139,10 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             fmt!(s, "({}.load)", type_to_str(&item));
         }
         Instr::SetArray { item } => {
+            fmt!(s, "(global.set tmp{})", type_to_str(&item));
             fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 8))");
             fmt!(s, "(i32.add)");
+            fmt!(s, "(global.get tmp{})", type_to_str(&item));
             fmt!(s, "({}.store)", type_to_str(&item));
         }
         Instr::GetText => {
@@ -329,6 +333,9 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
 
 (global $handy1 (mut i32) (i32.const 0))
 (global $handy2 (mut i32) (i32.const 0))
+(global $tmpf64 (mut f64) (f64.const 0.0))
+(global $tmpi32 (mut i32) (i32.const 0))
+(global $tmpi64 (mut i64) (i64.const 0))
 (global $capture_ptr (mut i32) (i32.const 0))
 ");
 
