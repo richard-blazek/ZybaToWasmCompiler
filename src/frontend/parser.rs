@@ -395,7 +395,7 @@ mod parser_tests {
         let src = r#"
             private a = 123;
             b = 3.14;
-            c = "abyz";
+            c = "tri";
             d = true;
         "#;
 
@@ -404,7 +404,7 @@ mod parser_tests {
 
         assert!(matches!(&parsed[0], Const { name, expr: Int { value: 123, .. }, private: true, .. } if name == "a"));
         assert!(matches!(&parsed[1], Const { name, expr: Real { value: 3.14, .. }, private: false, .. } if name == "b"));
-        assert!(matches!(&parsed[2], Const { name, expr: Text { value, .. }, private: false, .. } if name == "c" && value == "abyz"));
+        assert!(matches!(&parsed[2], Const { name, expr: Text { value, .. }, private: false, .. } if name == "c" && value == "tri"));
         assert!(matches!(&parsed[3], Const { name, expr: Bool { value: true, .. }, private: false, .. } if name == "d"));
     }
 
