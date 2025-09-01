@@ -80,8 +80,8 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::NewTuple { fields } => {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
             for i in (0..fields.len()).rev() {
-                fmt!(s, "(i32.add (global.get $handy1) (i32.const {}))", i * 8);
-                fmt!(s, "(i64.store)");
+                fmt!(s, "(global.set $handy2)");
+                fmt!(s, "(i64.store (i32.add (global.get $handy1) (i32.const {})) (global.get $handy2))", i * 8);
             }
             fmt!(s, "(global.get $handy1)");
         }
@@ -103,11 +103,10 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         }
         Instr::BindFunc { id, captures, .. } => {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", (captures.len() + 1) * 8);
-            fmt!(s, "(i32.store (i32.const {}) (global.get $handy1))", id);
+            fmt!(s, "(i32.store (global.get $handy1) (i32.const {}))", id);
             for (i, (loc_id, tpe)) in captures.into_iter().enumerate() {
-                fmt!(s, "(global.get $handy1)");
-                fmt!(s, "(local.get {})", loc_id);
                 fmt!(s, "(i32.add (global.get $handy1) (i32.const {}))", (i + 1) * 8);
+                fmt!(s, "(local.get {})", loc_id);
                 fmt!(s, "({}.store)", type_to_str(&tpe));
             }
             fmt!(s, "(global.get $handy1)");
@@ -117,28 +116,28 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::IntToTextAscii => {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const 2)))");
             fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
-            fmt!(s, "(i32.store8 (global.get $handy2) (global.get $handy1))");
-            fmt!(s, "(i32.store8 (i32.const 0) (i32.add (global.get $handy1) (i32.const 1)))");
+            fmt!(s, "(i32.store8 (global.get $handy1) (global.get $handy2))");
+            fmt!(s, "(i32.store8 (i32.add (global.get $handy1) (i32.const 1)) (i32.const 0))");
             fmt!(s, "(global.get $handy1)");
         }
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
         Instr::NotBool => fmt!(s, "(i32.eqz)"),
         Instr::PrintText => fmt!(s, "(call $puts)(i32.const 0)"),
         Instr::NewArray { item: _item } => {
-            fmt!(s, "(global.set $handy1 (i32.wrap_i64))");
-            fmt!(s, "(global.set $handy2 (call $malloc (i32.wrap_i64 (i32.add (i32.mul (global.get $handy1) (i32.const 8)) (i32.const 1)))))");
-            fmt!(s, "(i64.store (i64.extend_i32_s (global.get $handy1)) (global.get $handy2))");
+            fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
+            fmt!(s, "(global.set $handy1 (call $malloc (i32.wrap_i64 (i32.add (i32.mul (global.get $handy2) (i32.const 8)) (i32.const 1)))))");
+            fmt!(s, "(i64.store (global.get $handy1) (i64.extend_i32_s (global.get $handy2)))");
         }
         Instr::LenArray { item: _item } => {
-            fmt!(s, "(i64.store)");
+            fmt!(s, "(i64.load)");
         }
         Instr::GetArray { item } => {
-            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 1))");
+            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 8))");
             fmt!(s, "(i32.add)");
             fmt!(s, "({}.load)", type_to_str(&item));
         }
         Instr::SetArray { item } => {
-            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 1))");
+            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 8))");
             fmt!(s, "(i32.add)");
             fmt!(s, "({}.store)", type_to_str(&item));
         }

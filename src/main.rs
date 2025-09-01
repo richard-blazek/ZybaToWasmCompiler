@@ -68,12 +68,10 @@ fn main() {
 
     files.insert("hello.zyba".to_string(), "
     main = fun[] () {
-        x = \"He\" + \"llo\";
+        x = \"He\" + \"llo world\";
         y = chr[get[\"!\", 0]];
         print[x + y];
     };
-    
-    pi = 3.142;
     ".to_string());
 
     let fs: &dyn frontend::FS = &frontend::playground_fs(files);
