@@ -101,7 +101,13 @@ pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> O
         }
         ("not", [], [Int]) => Some(Int),
         ("not", [], [Bool]) => Some(Bool),
-        ("print", [], [Text]) => Some(void()),
+        ("print", [], ts) => {
+            if ts.iter().all(|t| [Int, Bool, Text, Real].contains(t)) {
+                Some(void())
+            } else {
+                None
+            }
+        }
         ("len", [], [Text | Array { .. }]) => Some(Int),
         ("get", [], [Array { item }, Int]) => Some(*item.clone()),
         ("get", [], [Text, Int]) => Some(Int),

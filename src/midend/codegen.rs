@@ -191,43 +191,34 @@ fn gen_access(object: Value, field: String, g: &mut Globals, l: &mut Locals) -> 
 }
 
 fn gen_if(cond: Value, then: Value, elsë: Value, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let then_id = g.new_label();
-    let ifte_id = g.new_label();
-
-    let then_t = Type::from(&then.tpe());
-    let else_t = Type::from(&elsë.tpe());
-
     let (drop_then, drop_else) = if tpe == void() {
-        (vec![Instr::Drop { tpe: then_t }, Instr::NewTuple { fields: vec![] }],
-         vec![Instr::Drop { tpe: else_t }, Instr::NewTuple { fields: vec![] }])
+        (vec![Instr::Drop { tpe: Type::from(&then.tpe()) }, Instr::NewTuple { fields: vec![] }],
+         vec![Instr::Drop { tpe: Type::from(&elsë.tpe()) }, Instr::NewTuple { fields: vec![] }])
     } else {
         (vec![], vec![])
     };
 
-    vec![Instr::Block { id: ifte_id, inner: cat!(
-        [Instr::Block { id: then_id, inner: cat!(
-            gen_value(cond, g, l),
-            [Instr::CondBlock { id: then_id }],
-            gen_value(then, g, l),
-            drop_then,
-            [Instr::QuitBlock { id: ifte_id }]
-        ) }],
-        gen_value(elsë, g, l),
-        drop_else
-    ) }]
+    cat!(
+        gen_value(cond, g, l),
+        [Instr::Ifte {
+            then: cat!(gen_value(then, g, l), drop_then),
+            elsë: cat!(gen_value(elsë, g, l), drop_else),
+            ret: Type::from(&tpe)
+        }]
+    )
 }
 
 fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let id = g.new_label();
+    let id =  g.new_label();
     let tpe = Type::from(&body.tpe());
 
     vec![
-        Instr::Block { id, inner: cat!(
+        Instr::Loop { id, inner: cat!(
             gen_value(cond, g, l),
-            [Instr::CondBlock { id }],
+            [Instr::QuitUnless { id }],
             gen_value(body, g, l),
             [Instr::Drop { tpe }],
-            [Instr::RepeatBlock { id }]
+            [Instr::RepeatLoop { id }]
         ) },
         Instr::NewTuple { fields: vec![] }
     ]
@@ -249,13 +240,13 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
         [Instr::SetLocal { id: expr_id, tpe: arr_t.clone() }],
         [Instr::PushInt { value: 0 }],
         [Instr::SetLocal { id: key_id, tpe: Type::Int }],
-        [Instr::Block { id, inner: cat!(
+        [Instr::Loop { id, inner: cat!(
             // Cond
             [Instr::GetLocal { id: key_id, tpe: Type::Int }],
             [Instr::GetLocal { id: expr_id, tpe: arr_t.clone() }],
             [Instr::LenArray { item: val_t.clone() }],
             [Instr::LtInt],
-            [Instr::CondBlock { id }],
+            [Instr::QuitUnless { id }],
 
             // Get array[i]
             [Instr::GetLocal { id: expr_id, tpe: arr_t.clone() }],
@@ -271,8 +262,9 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
             [Instr::PushInt { value: 1 }],
             [Instr::AddInt],
             [Instr::SetLocal { id: key_id, tpe: Type::Int }],
-            [Instr::RepeatBlock { id }]
-        ) }]
+            [Instr::RepeatLoop { id }]
+        )  }],
+        [Instr::NewTuple { fields: vec![] }]
     )
 }
 
@@ -519,7 +511,8 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
                 gen_value(array, g, l),
                 gen_value(idx, g, l),
                 gen_value(val, g, l),
-                [Instr::SetArray { item: Type::from(&item) }]
+                [Instr::SetArray { item: Type::from(&item) }],
+                [Instr::NewTuple { fields: vec![] }]
             )
         }
         _ => unreachable!()

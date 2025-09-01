@@ -68,30 +68,41 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::PushText { value } => gen_text_literal(s, value),
         Instr::PushBool { value } => fmt!(s, "(i32.const {})", value as i32),
         Instr::Drop { .. } => fmt!(s, "(drop)"),
-        Instr::Block { id, inner } => {
+        Instr::Loop { id, inner } => {
             fmt!(s, "(block $block_{} ", id);
             fmt!(s, "(loop $loop_{} ", id);
             gen_instrs(s, fn_types, inner);
             fmt!(s, "))");
         }
-        Instr::RepeatBlock { id } => fmt!(s, "(br $loop_{})", id),
-        Instr::QuitBlock { id } => fmt!(s, "(br $block_{})", id),
-        Instr::CondBlock { id } => fmt!(s, "(br_if $block_{} (i32.eqz))", id),
+        Instr::Ifte { then, elsë, ret } => {
+            fmt!(s, "(if (result {})", type_to_str(&ret));
+            fmt!(s, "(then ");
+            gen_instrs(s, fn_types, then);
+            fmt!(s, ")(else ");
+            gen_instrs(s, fn_types, elsë);
+            fmt!(s, "))");
+        }
+        Instr::RepeatLoop { id } => fmt!(s, "(br $loop_{})", id),
+        Instr::QuitUnless { id } => fmt!(s, "(br_if $block_{} (i32.eqz))", id),
         Instr::NewTuple { fields } => {
-            fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
-            for i in (0..fields.len()).rev() {
-                fmt!(s, "(global.set $handy2)");
-                fmt!(s, "(i64.store (i32.add (global.get $handy1) (i32.const {})) (global.get $handy2))", i * 8);
+            if fields.is_empty() {
+                fmt!(s, "(i32.const -1)")
+            } else {
+                fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
+                for i in (0..fields.len()).rev() {
+                    fmt!(s, "(global.set $handy2)");
+                    fmt!(s, "(i64.store (i32.add (global.get $handy1) (i32.const {})) (global.get $handy2))", i * 8);
+                }
+                fmt!(s, "(global.get $handy1)");
             }
-            fmt!(s, "(global.get $handy1)");
         }
         Instr::GetField { fields, i } => {
             fmt!(s, "({}.load offset={})", type_to_str(&fields[i]), i * 8);
         }
         Instr::SetField { fields, i } => {
-            fmt!(s, "(global.set tmp{})", type_to_str(&fields[i]));
+            fmt!(s, "(global.set $tmp{})", type_to_str(&fields[i]));
             fmt!(s, "(i32.add (i32.const {}))", i * 8);
-            fmt!(s, "(global.get tmp{})", type_to_str(&fields[i]));
+            fmt!(s, "(global.get $tmp{})", type_to_str(&fields[i]));
             fmt!(s, "({}.store)", type_to_str(&fields[i]));
         }
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
@@ -124,11 +135,14 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         }
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
         Instr::NotBool => fmt!(s, "(i32.eqz)"),
-        Instr::PrintText => fmt!(s, "(call $puts)(i32.const 0)"),
+        Instr::PrintText => fmt!(s, "(call $print_text)(i32.const 0)"),
+        Instr::PrintReal => fmt!(s, "(call $print_real)(i32.const 0)"),
+        Instr::PrintInt => fmt!(s, "(call $print_int)(i32.const 0)"),
         Instr::NewArray { item: _item } => {
             fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
-            fmt!(s, "(global.set $handy1 (call $malloc (i32.wrap_i64 (i32.add (i32.mul (global.get $handy2) (i32.const 8)) (i32.const 1)))))");
+            fmt!(s, "(global.set $handy1 (call $malloc (i32.add (i32.mul (global.get $handy2) (i32.const 8)) (i32.const 1))))");
             fmt!(s, "(i64.store (global.get $handy1) (i64.extend_i32_s (global.get $handy2)))");
+            fmt!(s, "(global.get $handy1)");
         }
         Instr::LenArray { item: _item } => {
             fmt!(s, "(i64.load)");
@@ -139,10 +153,10 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             fmt!(s, "({}.load)", type_to_str(&item));
         }
         Instr::SetArray { item } => {
-            fmt!(s, "(global.set tmp{})", type_to_str(&item));
+            fmt!(s, "(global.set $tmp{})", type_to_str(&item));
             fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 8))");
             fmt!(s, "(i32.add)");
-            fmt!(s, "(global.get tmp{})", type_to_str(&item));
+            fmt!(s, "(global.get $tmp{})", type_to_str(&item));
             fmt!(s, "({}.store)", type_to_str(&item));
         }
         Instr::GetText => {
@@ -163,7 +177,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::AddReal => fmt!(s, "(f64.add)"),
         Instr::SubInt => fmt!(s, "(i64.sub)"),
         Instr::SubReal => fmt!(s, "(f64.sub)"),
-        Instr::LtInt => fmt!(s, "(i64.lt)"),
+        Instr::LtInt => fmt!(s, "(i64.lt_s)"),
         Instr::EqInt => fmt!(s, "(i64.eq)"),
         Instr::LtReal => fmt!(s, "(f64.lt)"),
         Instr::EqReal => fmt!(s, "(f64.eq)"),
@@ -213,7 +227,14 @@ fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
 
 fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     fmt!(s, "(module
-(import \"env\" \"puts\" (func $puts (param i32)))
+(import \"env\" \"print_text\" (func $print_text (param i32)))
+(import \"env\" \"print_real\" (func $print_real (param f64)))
+(import \"env\" \"print_ints\" (func $print_ints (param i32 i32)))
+
+(func $print_int (param $n i64)
+  (call $print_ints
+    (i32.wrap_i64 (local.get $n))
+    (i32.wrap_i64 (i64.shr_u (local.get $n) (i64.const 32)))))
 
 (func $strlen (param $ptr i32) (result i32)
   (local $len i32)
@@ -357,3 +378,35 @@ pub fn generate(program: Program) -> String {
     gen_program(&mut s, program.funcs, program.entry);
     s
 }
+
+/*
+
+let memory = null;
+
+function print_text(ptr) {
+  const bytes = new Uint8Array(memory.buffer, ptr);
+  let str = "";
+  for (let i = 0; bytes[i] !== 0; i++) {
+    str += String.fromCharCode(bytes[i]);
+  }
+  console.log(str);
+}
+
+function print_real(num) {
+  console.log(num);
+}
+
+function print_ints(low, high) {
+  const big = BigInt(low >>> 0) | (BigInt(high) << 32n);
+  console.log(big.toString());
+}
+
+const wasmInstance =
+      new WebAssembly.Instance(wasmModule, { env: { print_text, print_real, print_ints, memory } });
+
+let main = wasmInstance.exports.main;
+memory = wasmInstance.exports.memory;
+main()
+
+
+*/

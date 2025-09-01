@@ -58,19 +58,17 @@ pub enum Instr {
     // stack after:  [any]
     Drop { tpe: Type },
 
-    // defines a pair of labels
-    Block { id: usize, inner: Vec<Instr> },
+    // defines a label above/below a block of instruction
+    Loop { id: usize, inner: Vec<Instr> },
+    Ifte { then: Vec<Instr>, elsë: Vec<Instr>, ret: Type },
 
-    // jump to the top label with the given id
-    RepeatBlock { id: usize },
-
-    // jump to the bottom label with the given id
-    QuitBlock { id: usize },
+    // jump to the label with the given id
+    RepeatLoop { id: usize },
 
     // stack before: [any, bool]
     // stack after:  [any]
     // if bool == false, jump to the bottom label with the given id
-    CondBlock { id: usize },
+    QuitUnless { id: usize },
 
     // stack before: [any, fields[0], .., fields[N-1]]
     // stack after:  [any, { fields[0], .., fields[N-1] }]
@@ -114,8 +112,10 @@ pub enum Instr {
 
     // stack before: [any, value]
     // stack after:  [any]
-    // prints value of type=Text
+    // prints value
     PrintText,
+    PrintReal,
+    PrintInt,
 
     // stack before: [any, len]
     // stack after:  [any, array of length=len]

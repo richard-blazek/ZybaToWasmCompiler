@@ -68,15 +68,18 @@ fn main() {
 
     files.insert("hello.zyba".to_string(), "
     main = fun[] () {
-        x = \"He\" + \"llo world\";
-        y = chr[get[\"!\", 0]];
-        print[x + y];
+        result = array[Int, 10];
+        i = 1
+        while i <= 10 {
+            print[\"Hey\"];
+            i = i + 1;
+        }
     };
     ".to_string());
 
     let fs: &dyn frontend::FS = &frontend::playground_fs(files);
 
-    let (main_fn, decls) = match frontend::compile(fs, "hello.zyba") {
+    let (main_fn, decls) = match frontend::compile(fs, "funcs.zyba") {
         Ok((main_path, files)) => {
             (main_path, files)
         },
