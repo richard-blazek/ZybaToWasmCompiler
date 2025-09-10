@@ -27,20 +27,6 @@ fn main() {
         radius * radius * math::pi
     };
 
-    isPrime = fun[n: Int] Bool {
-        prime = true;
-        if n < 2 {
-            prime = false;
-        } else {
-            i = 2;
-            while i * i <= n && prime {
-                prime = n % i != 0;
-                i = i + 1;
-            }
-        }
-        prime
-    };
-
     sum = fun[n: Array[Int]] Int {
         total = 0;
         for index, value : n {
@@ -58,6 +44,20 @@ fn main() {
     };
     
     main = fun[] () {
+        isPrime = fun[n: Int] Bool {
+            prime = true;
+            if n < 2 {
+                prime = false;
+            } else {
+                i = 2;
+                while i * i <= n && prime {
+                    prime = n % i != 0;
+                    i = i + 1;
+                }
+            }
+            prime
+        };
+
         nums_to_120 = range[math::factorial[5]];
         for num : nums_to_120 {
             print[num, \" \", isPrime[num], \"\\n\"];
