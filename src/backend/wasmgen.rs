@@ -211,14 +211,19 @@ fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
     }
     fmt!(s, "(result {})", type_to_str(&f.ret));
 
-    for (i, (loc_id, loc_tpe)) in f.captures.into_iter().enumerate() {
-        fmt!(s, "(local {})", type_to_str(&loc_tpe));
-        fmt!(s, "({}.load (i32.add (global.get $capture_ptr) (i32.const {})))", type_to_str(&loc_tpe), i * 8);
-        fmt!(s, "(local.set {})", loc_id);
+    if !f.captures.is_empty() || !f.locals.is_empty() {
+        fmt!(s, "(local");
+        for (_, loc_tpe) in &f.captures {
+            fmt!(s, " {}", type_to_str(loc_tpe));
+        }
+        for loc_tpe in &f.locals {
+            fmt!(s, " {}", type_to_str(loc_tpe));
+        }
+        fmt!(s, ")");
     }
 
-    for loc_tpe in f.locals {
-        fmt!(s, "(local {})", type_to_str(&loc_tpe));
+    for (i, (loc_id, loc_tpe)) in f.captures.into_iter().enumerate() {
+        fmt!(s, "(local.set {} ({}.load (i32.add (global.get $capture_ptr) (i32.const {}))))", loc_id, type_to_str(&loc_tpe), i * 8);
     }
 
     gen_instrs(s, fn_types, f.code);
