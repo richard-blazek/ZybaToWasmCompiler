@@ -110,7 +110,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
         Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),
         Instr::CallFunc { args, ret } => {
             fmt!(s, "(global.set $handy1)");
-            fmt!(s, "(global.set $capture_ptr (i32.add (global.get $handy1) (i32.const 1)))");
+            fmt!(s, "(global.set $capture_ptr (i32.add (global.get $handy1) (i32.const 8)))");
             fmt!(s, "(i32.load (global.get $handy1))");
 
             fmt!(s, "(call_indirect (type ${}))", fn_types.type_of(&args, &ret));
