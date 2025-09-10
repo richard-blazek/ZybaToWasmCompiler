@@ -7,7 +7,6 @@ pub struct Globals {
     funcs: Vec<Func>,
     instrs: HashMap<String, Instr>,
     func_ids: HashMap<String, usize>,
-    counter: usize,
     labels: usize
 }
 
@@ -15,7 +14,6 @@ impl Globals {
     pub fn new(values: &HashMap<String, Value>) -> Globals {
         let mut instrs = HashMap::new();
         let mut func_ids = HashMap::new();
-        let mut counter = 0;
 
         for (name, value) in values {
             use Instr::*;
@@ -39,21 +37,21 @@ impl Globals {
                         Type::from(t)
                     }).collect();
 
+                    let index = func_ids.len();
                     instrs.insert(name.clone(), BindFunc {
-                        id: counter,
+                        id: index,
                         args: arg_types,
                         ret: Type::from(ret),
                         captures: vec![]
                     });
-                    func_ids.insert(name, counter);
-                    counter += 1;
+                    func_ids.insert(name, index);
                 }
                 _ => unreachable!()
             }
         }
 
         let mut funcs = vec![];
-        funcs.resize(counter, Func {
+        funcs.resize(func_ids.len(), Func {
             code: vec![],
             args: vec![],
             ret: Type::Tuple(vec![]),
@@ -61,7 +59,7 @@ impl Globals {
             locals: vec![]
         });
 
-        Globals { instrs, funcs, func_ids, counter, labels: 0 }
+        Globals { instrs, funcs, func_ids, labels: 0 }
     }
 
     pub fn contains(&self, name: &str) -> bool {
@@ -81,9 +79,8 @@ impl Globals {
     }
 
     pub fn add_lambda(&mut self, func: Func) -> usize {
-        self.funcs[self.counter - 1] = func;
-        self.counter += 1;
-        self.counter - 1
+        self.funcs.push(func);
+        self.funcs.len() - 1
     }
 
     pub fn new_label(&mut self) -> usize {
