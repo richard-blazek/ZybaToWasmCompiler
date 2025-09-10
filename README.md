@@ -1,2 +1,1 @@
-# Zyba Compiler 2
-
+# Zyba-To-WASM Compiler
