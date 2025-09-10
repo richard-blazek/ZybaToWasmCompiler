@@ -97,7 +97,8 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
             }
         }
         Instr::GetField { fields, i } => {
-            fmt!(s, "({}.load offset={})", type_to_str(&fields[i]), i * 8);
+            fmt!(s, "(i32.add (i32.const {}))", i * 8);
+            fmt!(s, "({}.load)", type_to_str(&fields[i]));
         }
         Instr::SetField { fields, i } => {
             fmt!(s, "(global.set $tmp{})", type_to_str(&fields[i]));
@@ -212,7 +213,7 @@ fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
 
     for (i, (loc_id, loc_tpe)) in f.captures.into_iter().enumerate() {
         fmt!(s, "(local {})", type_to_str(&loc_tpe));
-        fmt!(s, "({}.load (global.get $capture_ptr) offset={})", type_to_str(&loc_tpe), i * 8);
+        fmt!(s, "({}.load (i32.add (global.get $capture_ptr) (i32.const {})))", type_to_str(&loc_tpe), i * 8);
         fmt!(s, "(local.set {})", loc_id);
     }
 
