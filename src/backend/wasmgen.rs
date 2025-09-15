@@ -89,9 +89,9 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
                 fmt!(s, "(i32.const -1)")
             } else {
                 fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
-                for i in (0..fields.len()).rev() {
-                    fmt!(s, "(global.set $handy2)");
-                    fmt!(s, "(i64.store (i32.add (global.get $handy1) (i32.const {})) (global.get $handy2))", i * 8);
+                for (i, tpe) in fields.iter().enumerate().rev() {
+                    fmt!(s, "(global.set $tmp{})", type_to_str(tpe));
+                    fmt!(s, "(i64.store (i32.add (global.get $handy1) (i32.const {})) (global.get $tmp{}))", i * 8, type_to_str(tpe));
                 }
                 fmt!(s, "(global.get $handy1)");
             }
