@@ -124,12 +124,6 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
             fmt!(s, "(i32.add (i32.const {}))", i * 8);
             fmt!(s, "({}.load)", type_to_str(&fields[i]));
         }
-        Instr::SetField { fields, i } => {
-            fmt!(s, "(global.set $tmp{})", type_to_str(&fields[i]));
-            fmt!(s, "(i32.add (i32.const {}))", i * 8);
-            fmt!(s, "(global.get $tmp{})", type_to_str(&fields[i]));
-            fmt!(s, "({}.store)", type_to_str(&fields[i]));
-        }
         Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
         Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),
         Instr::CallFunc { args, ret } => {
