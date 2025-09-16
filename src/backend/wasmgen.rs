@@ -50,36 +50,58 @@ impl FnTypes {
     }
 }
 
-fn gen_text_literal(s: &mut String, text: String) {
-    let mut bytes = text.into_bytes();
-    bytes.resize(bytes.len() + (4 - bytes.len() % 4), 0);
-
-    fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", bytes.len());
-    for (i, byte) in bytes.iter().enumerate() {
-        fmt!(s, "(i32.store8 (i32.add (global.get $handy1) (i32.const {})) (i32.const {}))", i, byte);
-    }
-    fmt!(s, "(global.get $handy1)");
+struct TextLiterals {
+    literals: HashMap<String, i32>,
+    offset: i32
 }
 
-fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
+impl TextLiterals {
+    fn gen_text_literal(&mut self, s: &mut String, lit: String) {
+        let offset = if !self.literals.contains_key(&lit) {
+            let offset = self.offset;
+            self.offset += lit.len() as i32 + 1;
+            self.literals.insert(lit, offset);
+            offset
+        } else {
+            self.literals[&lit]
+        };
+        fmt!(s, "(i32.const {})", offset);
+    }
+
+    fn gen_memory(&self, s: &mut String) {
+        fmt!(s, "(memory (export \"memory\") {})", (self.offset >> 16) + 1);
+        for (literal, offset) in self.literals.iter() {
+            let escaped: String = literal.bytes().map(|c| {
+                if c.is_ascii_graphic() {
+                    (c as char).to_string()
+                } else {
+                    format!("\\{:02x}", c)
+                }
+            }).collect();
+            fmt!(s, "(data (i32.const {}) \"{}\\00\")", offset, escaped);
+        }
+    }
+}
+
+fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, instr: Instr) {
     match instr {
         Instr::PushInt { value } => fmt!(s, "(i64.const {})", value),
         Instr::PushReal { value } => fmt!(s, "(f64.const {})", value),
-        Instr::PushText { value } => gen_text_literal(s, value),
+        Instr::PushText { value } => txt_lits.gen_text_literal(s, value),
         Instr::PushBool { value } => fmt!(s, "(i32.const {})", value as i32),
         Instr::Drop { .. } => fmt!(s, "(drop)"),
         Instr::Loop { id, inner } => {
             fmt!(s, "(block $block_{} ", id);
             fmt!(s, "(loop $loop_{} ", id);
-            gen_instrs(s, fn_types, inner);
+            gen_instrs(s, fn_types, txt_lits, inner);
             fmt!(s, "))");
         }
         Instr::Ifte { then, elsë, ret } => {
             fmt!(s, "(if (result {})", type_to_str(&ret));
             fmt!(s, "(then ");
-            gen_instrs(s, fn_types, then);
+            gen_instrs(s, fn_types, txt_lits, then);
             fmt!(s, ")(else ");
-            gen_instrs(s, fn_types, elsë);
+            gen_instrs(s, fn_types, txt_lits, elsë);
             fmt!(s, "))");
         }
         Instr::RepeatLoop { id } => fmt!(s, "(br $loop_{})", id),
@@ -193,13 +215,13 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, instr: Instr) {
     }
 }
 
-fn gen_instrs(s: &mut String, fn_types: &mut FnTypes, instrs: Vec<Instr>) {
+fn gen_instrs(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, instrs: Vec<Instr>) {
     for instr in instrs {
-        gen_instr(s, fn_types, instr);
+        gen_instr(s, fn_types, txt_lits, instr);
     }
 }
 
-fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
+fn gen_func(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, i: usize, f: Func) {
     fmt!(s, "(func $func_{} ", i);
 
     if !f.args.is_empty() {
@@ -226,7 +248,7 @@ fn gen_func(s: &mut String, fn_types: &mut FnTypes, i: usize, f: Func) {
         fmt!(s, "(local.set {} ({}.load (i32.add (global.get $capture_ptr) (i32.const {}))))", loc_id, type_to_str(&loc_tpe), i * 8);
     }
 
-    gen_instrs(s, fn_types, f.code);
+    gen_instrs(s, fn_types, txt_lits, f.code);
     fmt!(s, ")");
 
     fmt!(s, "(elem (i32.const {}) $func_{})", i, i);
@@ -291,7 +313,6 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     return)
   (i32.const 0))
 
-(memory (export \"memory\") 1)
 (global $heap_ptr (mut i32) (i32.const 0))
 (func $malloc (param $size i32) (result i32)
     (local $old_base i32)
@@ -370,11 +391,14 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
     fmt!(s, "(table $table {} funcref)", funcs.len());
 
     let mut fn_types = FnTypes { map: HashMap::new() };
+    let mut txt_lits = TextLiterals { offset: 0, literals: HashMap::new() };
+
     for (i, func) in funcs.into_iter().enumerate() {
-        gen_func(s, &mut fn_types, i, func);
+        gen_func(s, &mut fn_types, &mut txt_lits, i, func);
     }
 
     fn_types.gen_signatures(s);
+    txt_lits.gen_memory(s);
 
     fmt!(s, "(func (export \"main\") (call $func_{}) (drop))", entry);
     fmt!(s, ") ");
