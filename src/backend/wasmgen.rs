@@ -22,7 +22,9 @@ struct FnTypes {
 
 impl FnTypes {
     fn type_of(&mut self, args: &Vec<Type>, ret: &Type) -> String {
-        let args: Vec<_> = args.iter().map(|arg| type_to_str(arg).to_string()).collect();
+        let args = args.iter().map(|arg| {
+            type_to_str(arg).to_string()
+        }).collect::<Vec<_>>();
         let ret = type_to_str(ret).to_string();
 
         if let Some(typename) = self.map.get(&(args.clone(), ret.clone())) {
@@ -105,7 +107,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
             fmt!(s, "))");
         }
         Instr::RepeatLoop { id } => fmt!(s, "(br $loop_{})", id),
-        Instr::QuitUnless { id } => fmt!(s, "(br_if $block_{} (i32.eqz))", id),
+        Instr::QuitIf { id } => fmt!(s, "(br_if $block_{})", id),
         Instr::NewTuple { fields } => {
             if fields.is_empty() {
                 fmt!(s, "(i32.const -1)")
@@ -151,9 +153,8 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
         Instr::IntToReal => fmt!(s, "(f64.convert_i64_s)"),
         Instr::IntToTextAscii => {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const 2)))");
-            fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
-            fmt!(s, "(i32.store8 (global.get $handy1) (global.get $handy2))");
-            fmt!(s, "(i32.store8 (i32.add (global.get $handy1) (i32.const 1)) (i32.const 0))");
+            fmt!(s, "(global.set $handy2 (i32.and (i32.const 255) (i32.wrap_i64)))");
+            fmt!(s, "(i32.store16 (global.get $handy1) (global.get $handy2))");
             fmt!(s, "(global.get $handy1)");
         }
         Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
@@ -172,7 +173,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
             fmt!(s, "(i64.load)");
         }
         Instr::GetArray { item } => {
-            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 8))");
+            fmt!(s, "(i32.shl (i32.add (i32.wrap_i64) (i32.const 1)) (i32.const 3))");
             fmt!(s, "(i32.add)");
             fmt!(s, "({}.load)", type_to_str(&item));
         }

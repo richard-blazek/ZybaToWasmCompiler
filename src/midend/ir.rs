@@ -67,8 +67,8 @@ pub enum Instr {
 
     // stack before: [any, bool]
     // stack after:  [any]
-    // if bool == false, jump to the bottom label with the given id
-    QuitUnless { id: usize },
+    // if bool is true, jump to the bottom label with the given id
+    QuitIf { id: usize },
 
     // stack before: [any, fields[0], .., fields[N-1]]
     // stack after:  [any, { fields[0], .., fields[N-1] }]

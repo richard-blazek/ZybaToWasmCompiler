@@ -215,7 +215,7 @@ fn gen_while(cond: Value, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<I
     vec![
         Instr::Loop { id, inner: cat!(
             gen_value(cond, g, l),
-            [Instr::QuitUnless { id }],
+            [Instr::NotBool, Instr::QuitIf { id }],
             gen_value(body, g, l),
             [Instr::Drop { tpe }],
             [Instr::RepeatLoop { id }]
@@ -245,8 +245,8 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
             [Instr::GetLocal { id: key_id, tpe: Type::Int }],
             [Instr::GetLocal { id: expr_id, tpe: arr_t.clone() }],
             [Instr::LenArray { item: val_t.clone() }],
-            [Instr::LtInt],
-            [Instr::QuitUnless { id }],
+            [Instr::EqInt],
+            [Instr::QuitIf { id }],
 
             // Get array[i]
             [Instr::GetLocal { id: expr_id, tpe: arr_t.clone() }],
