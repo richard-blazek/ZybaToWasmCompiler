@@ -58,7 +58,7 @@ fn main() {
             prime
         };
 
-        nums_to_120 = range[math::factorial[5]];
+        nums_to_120 = range[math::factorial[(8 >> 1) | 1]];
         for num : nums_to_120 {
             print[num, \" \", isPrime[num], \"\\n\"];
         }

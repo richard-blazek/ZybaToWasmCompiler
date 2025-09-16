@@ -409,6 +409,15 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         ("-", [Real, Real]) => {
             gen_binary_op(Instr::SubReal, args, g, l)
         }
+        ("<<", [Int, Int]) => {
+            gen_binary_op(Instr::LslInt, args, g, l)
+        }
+        (">>", [Int, Int]) => {
+            gen_binary_op(Instr::AsrInt, args, g, l)
+        }
+        (">>>", [Int, Int]) => {
+            gen_binary_op(Instr::LsrInt, args, g, l)
+        }
         ("&", [Int, Int]) => {
             gen_binary_op(Instr::AndInt, args, g, l)
         }
@@ -527,7 +536,7 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
                 [Instr::NewTuple { fields: vec![] }]
             )
         }
-        _ => unreachable!()
+        _ => unreachable!() // If this happens, there is a bug in the compiler
     }
 }
 

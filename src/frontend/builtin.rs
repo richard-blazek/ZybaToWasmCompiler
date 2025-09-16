@@ -125,8 +125,8 @@ pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> O
 
 static OPERATORS : LazyLock<Vec<HashSet<&str>>> = LazyLock::new(|| {
     vec![
-        HashSet::from(["*", "/", "%", "&", "|", "^"]),
-        HashSet::from(["+", "-"]),
+        HashSet::from(["*", "/", "%", "<<", ">>"]),
+        HashSet::from(["+", "-", "&", "|", "^"]),
         HashSet::from(["==", "!=", "<", "<=", ">", ">="]),
         HashSet::from(["||", "&&"]),
     ]
@@ -157,7 +157,7 @@ pub fn apply_builtin_op(name: &str, lhs: Type, rhs: Type) -> Option<Type> {
         ("==" | "!=" | "<" | "<=" | ">" | ">=", Text, Text) => Some(Bool),
         ("==" | "!=", Bool, Bool) => Some(Bool),
 
-        ("&" | "^" | "|", Int, Int) => Some(Int),
+        ("&" | "^" | "|" | "<<" | ">>" | ">>>", Int, Int) => Some(Int),
         ("&" | "^" | "|", Bool, Bool) => Some(Bool),
         ("&&" | "||", Bool, Bool) => Some(Bool),
 
