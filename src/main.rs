@@ -23,16 +23,12 @@ fn main() {
     files.insert("funcs.zyba".to_string(), "
     import \"math.zyba\";
 
-    private circleArea = fun[radius: Real] Real {
-        radius * radius * math::pi
-    };
-
-    sum = fun[n: Array[Int]] Int {
-        total = 0;
-        for index, value : n {
-            total = total + value;
-        }
-        total
+    private circle = fun[radius: Real] (r: Real, c: Real, a: Real) {
+        t = ();
+        u = t | (r: radius);
+        p = u | (c: 2.0 * radius * math::pi);
+        l = p | (a: radius * radius * math::pi);
+        l
     };
 
     range = fun[n: Int] Array[Int] {
@@ -57,6 +53,8 @@ fn main() {
             }
             prime
         };
+
+        c = circle[4.0];
 
         nums_to_120 = range[math::factorial[(8 >> 1) | 1]];
         for num : nums_to_120 {

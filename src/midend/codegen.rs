@@ -460,6 +460,54 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         ("==" | "!=" | "<" | "<=" | ">" | ">=", [t, _]) => {
             gen_cmp(&op, t, args, g, l)
         }
+        ("|", [Record { fields: f1 }, Record { fields: f2 }]) => {
+            let (rec1, rec2) = first2(args);
+            let tpe1 = Type::from(&rec1.tpe());
+            let tpe2 = Type::from(&rec2.tpe());
+            let loc1 = l.alloc(tpe1.clone());
+            let loc2 = l.alloc(tpe2.clone());
+            let fields1 = tpe1.tuple_fields();
+            let fields2 = tpe2.tuple_fields();
+
+            let key_indices1 = order_of(f1.keys().collect());
+            let key_indices2 = order_of(f2.keys().collect());
+
+            let key_set : HashSet<_> = f1.keys().chain(f2.keys()).collect();
+            let mut keys : Vec<_> = key_set.into_iter().collect();
+            keys.sort();
+
+            let mut fields = vec![];
+            let mut code = cat!(
+                gen_value(rec1, g, l),
+                [Instr::SetLocal { id: loc1, tpe: tpe1.clone() }],
+                gen_value(rec2, g, l),
+                [Instr::SetLocal { id: loc2, tpe: tpe2.clone() }]
+            );
+
+            for key in keys {
+                if f2.contains_key(key) {
+                    let tpe = Type::from(&f2[key]);
+                    fields.push(tpe.clone());
+
+                    code.push(Instr::GetLocal { id: loc2, tpe });
+                    code.push(Instr::GetField {
+                        fields: fields2.clone(),
+                        i: key_indices2[key]
+                    });
+                } else {
+                    let tpe = Type::from(&f1[key]);
+                    fields.push(tpe.clone());
+
+                    code.push(Instr::GetLocal { id: loc1, tpe });
+                    code.push(Instr::GetField {
+                        fields: fields1.clone(),
+                        i: key_indices1[key]
+                    });
+                }
+            }
+            code.push(Instr::NewTuple { fields });
+            code
+        }
         ("int", [Int]) | ("real", [Real]) | ("bool", [Bool]) | ("text", [Text]) => {
             gen_value(first(args), g, l)
         }
