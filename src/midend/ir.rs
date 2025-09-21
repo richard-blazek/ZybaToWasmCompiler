@@ -43,6 +43,13 @@ impl Type {
             _ => unreachable!()
         }
     }
+
+    pub fn tuple_fields(&self) -> Vec<Type> {
+        match self {
+            Type::Tuple(items) => items.clone(),
+            _ => unreachable!()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
