@@ -39,7 +39,7 @@ impl std::fmt::Display for Type {
                     if i != 0 {
                         f.write_str(", ")?;
                     }
-                    f.write_str(&name)?;
+                    f.write_str(name)?;
                     f.write_str(": ")?;
                     tpe.fmt(f)?;
                 }
@@ -59,6 +59,10 @@ pub fn get_scalar_type(name: &str) -> Option<Type> {
     }
 }
 
+pub fn is_type_name(name: &str) -> bool {
+    get_scalar_type(name).is_some() || name == "Array" || name == "Func"
+}
+
 pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
     match (name, args) {
         ("Array", [item]) => Some(Type::Array {
@@ -76,7 +80,7 @@ static BUILTIN_NAMES : LazyLock<HashSet<&str>> = LazyLock::new(|| {
     HashSet::from([
         "Int", "Real", "Text", "Bool", "Array", "Func",
         "int", "real", "text", "bool", "array",
-        "not", "print", "len", "has", "get", "set", "chr"
+        "not", "print", "len", "get", "set", "chr"
     ])
 });
 
@@ -123,17 +127,15 @@ pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> O
     }
 }
 
-static OPERATORS : LazyLock<Vec<HashSet<&str>>> = LazyLock::new(|| {
-    vec![
-        HashSet::from(["*", "/", "%", "<<", ">>"]),
-        HashSet::from(["+", "-", "&", "|", "^"]),
-        HashSet::from(["==", "!=", "<", "<=", ">", ">="]),
-        HashSet::from(["||", "&&"]),
-    ]
+static OPERATORS : LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    HashSet::from([
+        "*", "/", "%", "<<", ">>", ">>>", "+", "-", "&", "|", "^",
+        "==", "!=", "<", "<=", ">", ">=", "||", "&&",
+    ])
 });
 
 pub fn is_builtin_operator(name: &str) -> bool {
-    OPERATORS.iter().any(|set| set.contains(name))
+    OPERATORS.contains(name)
 }
 
 pub fn apply_builtin_op(name: &str, lhs: Type, rhs: Type) -> Option<Type> {

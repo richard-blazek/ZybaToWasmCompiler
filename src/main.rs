@@ -13,8 +13,8 @@ fn main() {
         while i <= n {
             result = result * i;
             i = i + 1;
-        }
-        result
+        };
+        result;
     };
     
     pi = 3.142;
@@ -28,15 +28,15 @@ fn main() {
         u = t | (r: radius);
         p = u | (c: 2.0 * radius * math::pi);
         l = p | (a: radius * radius * math::pi);
-        l
+        l;
     };
 
     range = fun[n: Int] Array[Int] {
         result = array[Int, n];
         for i, value : result {
             set[result, i, i + 1];
-        }
-        result
+        };
+        result;
     };
     
     main = fun[] () {
@@ -49,9 +49,9 @@ fn main() {
                 while i * i <= n && prime {
                     prime = n % i != 0;
                     i = i + 1;
-                }
-            }
-            prime
+                };
+            };
+            prime;
         };
 
         c = circle[4.0];
@@ -59,7 +59,7 @@ fn main() {
         nums_to_120 = range[math::factorial[(8 >> 1) | 1]];
         for num : nums_to_120 {
             print[num, \" \", isPrime[num], \"\\n\"];
-        }
+        };
     };".to_string());
 
     let fs: &dyn frontend::FS = &frontend::playground_fs(files);
