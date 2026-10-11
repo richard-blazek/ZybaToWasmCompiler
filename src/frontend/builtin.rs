@@ -59,10 +59,6 @@ pub fn get_scalar_type(name: &str) -> Option<Type> {
     }
 }
 
-pub fn is_type_name(name: &str) -> bool {
-    get_scalar_type(name).is_some() || name == "Array" || name == "Func"
-}
-
 pub fn get_generic_type(name: &str, args: &[Type]) -> Option<Type> {
     match (name, args) {
         ("Array", [item]) => Some(Type::Array {
@@ -92,37 +88,35 @@ pub fn void() -> Type {
     Type::Record { fields: HashMap::new() }
 }
 
-pub fn apply_builtin_fn(name: &str, type_args: &[Type], arg_types: &[Type]) -> Option<Type> {
+pub fn apply_builtin_fn(name: &str, arg_types: &[Type]) -> Option<Type> {
     use Type::*;
 
-    match (name, type_args, arg_types) {
-        ("int", [], [Int | Bool | Real]) => Some(Int),
-        ("real", [], [Int | Real]) => Some(Real),
-        ("bool", [], [Int | Bool]) => Some(Bool),
-        ("text", [], [Text]) => Some(Text),
-        ("array", [item], [Int]) => {
-            Some(Array { item: Box::new(item.clone()) })
-        }
-        ("not", [], [Int]) => Some(Int),
-        ("not", [], [Bool]) => Some(Bool),
-        ("print", [], ts) => {
+    match (name, arg_types) {
+        ("int", [Int | Bool | Real]) => Some(Int),
+        ("real", [Int | Real]) => Some(Real),
+        ("bool", [Int | Bool]) => Some(Bool),
+        ("text", [Text]) => Some(Text),
+        ("array", [init, Int]) => Some(Array { item: Box::new(init.clone()) }),
+        ("not", [Int]) => Some(Int),
+        ("not", [Bool]) => Some(Bool),
+        ("print", ts) => {
             if ts.iter().all(|t| [Int, Bool, Text, Real].contains(t)) {
                 Some(void())
             } else {
                 None
             }
         }
-        ("len", [], [Text | Array { .. }]) => Some(Int),
-        ("get", [], [Array { item }, Int]) => Some(*item.clone()),
-        ("get", [], [Text, Int]) => Some(Int),
-        ("set", [], [Array { item }, Int, new_item]) => {
+        ("len", [Text | Array { .. }]) => Some(Int),
+        ("get", [Array { item }, Int]) => Some(*item.clone()),
+        ("get", [Text, Int]) => Some(Int),
+        ("set", [Array { item }, Int, new_item]) => {
             if **item == *new_item {
                 Some(void())
             } else {
                 None
             }
         }
-        ("chr", [], [Int]) => Some(Text),
+        ("chr", [Int]) => Some(Text),
         _ => None
     }
 }

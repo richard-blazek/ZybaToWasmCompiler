@@ -70,15 +70,6 @@ fn check_type(tpe: &Expr) -> Fallible<Type> {
     }
 }
 
-fn looks_like_type(e: &Expr) -> bool {
-    match e {
-        Expr::Var { name, .. } => is_type_name(name),
-        Expr::Call { func, .. } => matches!(&**func, Expr::Var { name, .. } if is_type_name(name)),
-        Expr::Record { fields, .. } => fields.values().all(looks_like_type),
-        _ => false
-    }
-}
-
 fn global_env(globals: &HashMap<String, Expr>, paths: &HashMap<String, String>) -> Fallible<HashMap<String, Type>> {
     let mut env = HashMap::new();
     for (name, value) in globals {
@@ -256,18 +247,15 @@ fn check_call(line: i64, func: Expr, args: Vec<Expr>, env: &mut HashMap<String, 
 }
 
 fn check_builtin_call(line: i64, builtin: String, args: Vec<Expr>, env: &mut HashMap<String, Type>) -> Fallible<Value> {
-    let type_args = args.iter().take_while(|arg| {
-        looks_like_type(arg)
-    }).map(check_type).collect::<Fallible<Vec<_>>>()?;
-    let args = args.into_iter().skip(type_args.len()).map(|arg| {
+    let args = args.into_iter().map(|arg| {
         check_value(arg, env)
     }).collect::<Fallible<Vec<_>>>()?;
     let arg_types = args.iter().map(Value::tpe).collect::<Vec<_>>();
 
-    if let Some(tpe) = apply_builtin_fn(&builtin, &type_args, &arg_types) {
+    if let Some(tpe) = apply_builtin_fn(&builtin, &arg_types) {
         Ok(Value::Builtin { op: builtin, args, tpe })
     } else {
-        let arg_str = type_args.iter().chain(arg_types.iter()).map(|t| {
+        let arg_str = arg_types.iter().map(|t| {
             format!("{}", t)
         }).collect::<Vec<_>>().join(", ");
         err(line, format!("There is no built-in function {}[{}]", builtin, arg_str))
@@ -834,7 +822,7 @@ mod tests {
         use super::*;
 
         fn texts() -> Expr {
-            builtin("array", vec![t("Text"), int(3)])
+            builtin("array", vec![text(""), int(3)])
         }
 
         #[test]
@@ -977,32 +965,33 @@ mod tests {
         }
 
         fn ints() -> Expr {
-            builtin("array", vec![t("Int"), int(2)])
+            builtin("array", vec![int(0), int(2)])
         }
 
         #[test]
-        fn array_takes_the_item_type_and_the_length() {
-            assert_eq!(type_of_builtin("array", vec![t("Int"), int(2)]), Ok(array(Int)));
-            assert_eq!(type_of_builtin("array", vec![t_array(t("Real")), int(2)]), Ok(array(array(Real))));
-            assert_eq!(type_of_builtin("array", vec![t_void(), int(2)]), Ok(array(void())));
+        fn array_takes_the_initial_item_and_the_length() {
+            assert_eq!(type_of_builtin("array", vec![int(0), int(2)]), Ok(array(Int)));
+            let reals = builtin("array", vec![real(0.0), int(1)]);
+            assert_eq!(type_of_builtin("array", vec![reals, int(2)]), Ok(array(array(Real))));
+            assert_eq!(type_of_builtin("array", vec![record(vec![]), int(2)]), Ok(array(void())));
         }
 
         #[test]
-        fn type_arguments_are_not_values() {
-            let checked = value_of(vec![builtin("array", vec![t("Text"), int(2)])]);
+        fn array_keeps_both_arguments() {
+            let checked = value_of(vec![builtin("array", vec![text(""), int(2)])]);
             assert_eq!(checked, Value::Builtin {
                 op: "array".into(),
-                args: vec![Value::Int { value: 2, tpe: Int }],
+                args: vec![Value::Text { value: "".into(), tpe: Text }, Value::Int { value: 2, tpe: Int }],
                 tpe: array(Text)
             });
         }
 
         #[test]
-        fn array_needs_exactly_one_type_and_an_int() {
+        fn array_needs_an_item_and_an_int_length() {
             let err = |sig: &str| Err(error(3, &format!("There is no built-in function array[{}]", sig)));
             assert_eq!(type_of_builtin("array", vec![int(2)]), err("Int"));
-            assert_eq!(type_of_builtin("array", vec![t("Int"), t("Int"), int(2)]), err("Int, Int, Int"));
-            assert_eq!(type_of_builtin("array", vec![t("Int"), real(2.0)]), err("Int, Real"));
+            assert_eq!(type_of_builtin("array", vec![int(0), int(2), int(3)]), err("Int, Int, Int"));
+            assert_eq!(type_of_builtin("array", vec![int(0), real(2.0)]), err("Int, Real"));
         }
 
         #[test]
@@ -1071,7 +1060,7 @@ mod tests {
         #[test]
         fn get_gives_the_item_or_the_character_code() {
             assert_eq!(type_of_builtin("get", vec![ints(), int(0)]), Ok(Int));
-            let texts = builtin("array", vec![t("Text"), int(2)]);
+            let texts = builtin("array", vec![text(""), int(2)]);
             assert_eq!(type_of_builtin("get", vec![texts, int(0)]), Ok(Text));
             assert_eq!(type_of_builtin("get", vec![text("abc"), int(0)]), Ok(Int));
             assert_eq!(
@@ -1099,11 +1088,11 @@ mod tests {
         }
 
         #[test]
-        fn errors_in_type_arguments_are_reported() {
-            let bad = t_array(at(4, var("x")));
-            assert_eq!(type_of_builtin("array", vec![bad, int(2)]), Err(error(4, "Type x does not exist")));
-            let bad = record(vec![("a", at(4, var("Array")))]);
-            assert_eq!(type_of_builtin("array", vec![bad, int(2)]), Err(error(4, "Type Array does not exist")));
+        fn types_are_not_builtin_arguments() {
+            let tpe = at(4, t("Int"));
+            assert_eq!(type_of_builtin("array", vec![tpe, int(2)]), Err(error(4, "Int cannot be used as a value")));
+            let tpe = record(vec![("a", at(4, t("Int")))]);
+            assert_eq!(type_of_builtin("array", vec![tpe, int(2)]), Err(error(4, "Int cannot be used as a value")));
         }
 
         #[test]
@@ -1196,7 +1185,7 @@ mod tests {
 
         #[test]
         fn arrays_and_functions_are_not_comparable() {
-            let arr = || builtin("array", vec![t("Int"), int(1)]);
+            let arr = || builtin("array", vec![int(0), int(1)]);
             assert_eq!(
                 type_of_op(arr(), "==", arr()),
                 Err(error(3, "Operator == does not accept Array[Int] and Array[Int]"))

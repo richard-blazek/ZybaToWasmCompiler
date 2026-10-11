@@ -381,6 +381,45 @@ impl Lowerer {
         None
     }
 
+    fn gen_array(&mut self, init: Value, len: Value, f: &mut FnCtx) -> Option<usize> {
+        let init = self.gen_value(init, f);
+        let len = self.gen_value(len, f).unwrap();
+        let zero = f.fb.i64(0);
+        let max = f.fb.i64(MAX_ARRAY_LEN);
+        let non_negative = f.fb.int_cmp(CmpOp::Ge, len, zero);
+        let small = f.fb.int_cmp(CmpOp::Le, len, max);
+        let ok = f.fb.bool_bin(BoolBinOp::And, non_negative, small);
+        f.fb.trap_unless(ok);
+
+        let header = f.fb.i64(ITEMS_OFFSET as i64);
+        let size = if init.is_some() {
+            let slot = f.fb.i64(SLOT as i64);
+            let items = f.fb.int_bin(IntBinOp::Mul, len, slot);
+            f.fb.int_bin(IntBinOp::Add, items, header)
+        } else {
+            header
+        };
+        let array = f.fb.alloc(size);
+        f.fb.store(array, LEN_OFFSET, len);
+
+        // Items without a representation take no slots, so there is nothing to fill
+        if let Some(init) = init {
+            self.gen_loop(&[], vec![zero], f, |_, f, extra| {
+                f.fb.int_cmp(CmpOp::Lt, extra[0], len)
+            }, |_, f, extra| {
+                let i = extra[0];
+                let slot = f.fb.i64(SLOT as i64);
+                let offset = f.fb.int_bin(IntBinOp::Mul, i, slot);
+                let addr = f.fb.addr_add(array, offset);
+                f.fb.store(addr, ITEMS_OFFSET, init);
+
+                let one = f.fb.i64(1);
+                vec![f.fb.int_bin(IntBinOp::Add, i, one)]
+            });
+        }
+        Some(array)
+    }
+
     fn gen_function(
         &mut self,
         name: String,
@@ -470,6 +509,10 @@ impl Lowerer {
                 let (lhs, rhs) = first2(args);
                 return self.gen_merge(lhs, rhs, tpe, f);
             }
+            ("array", _) => {
+                let (init, len) = first2(args);
+                return self.gen_array(init, len, f);
+            }
             _ => {}
         }
 
@@ -544,27 +587,6 @@ impl Lowerer {
                 }
                 return None;
             }
-            ("array", [Int]) => {
-                let len = arg(0);
-                let zero = fb.i64(0);
-                let max = fb.i64(MAX_ARRAY_LEN);
-                let non_negative = fb.int_cmp(CmpOp::Ge, len, zero);
-                let small = fb.int_cmp(CmpOp::Le, len, max);
-                let ok = fb.bool_bin(BoolBinOp::And, non_negative, small);
-                fb.trap_unless(ok);
-
-                let header = fb.i64(ITEMS_OFFSET as i64);
-                let size = if repr(&tpe_item(&tpe)).is_some() {
-                    let slot = fb.i64(SLOT as i64);
-                    let items = fb.int_bin(IntBinOp::Mul, len, slot);
-                    fb.int_bin(IntBinOp::Add, items, header)
-                } else {
-                    header
-                };
-                let array = fb.alloc(size);
-                fb.store(array, LEN_OFFSET, len);
-                array
-            }
             ("len", [Text | Array { .. }]) => fb.load(Type::I64, arg(0), LEN_OFFSET),
             ("get", [Text, Int]) => {
                 let (text, i) = (arg(0), arg(1));
@@ -630,13 +652,6 @@ impl Lowerer {
                 last
             }
         }
-    }
-}
-
-fn tpe_item(t: &frontend::Type) -> frontend::Type {
-    match t {
-        frontend::Type::Array { item } => *item.clone(),
-        _ => unreachable!()
     }
 }
 
