@@ -16,6 +16,14 @@ fn type_to_str(tpe: &Type) -> &str {
     }
 }
 
+fn real_to_str(value: f64) -> String {
+    if value.is_nan() {
+        "nan".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
 struct FnTypes {
     map: HashMap<(Vec<String>, String), String>
 }
@@ -74,7 +82,7 @@ impl TextLiterals {
         fmt!(s, "(memory (export \"memory\") {})", (self.offset >> 16) + 1);
         for (literal, offset) in self.literals.iter() {
             let escaped: String = literal.bytes().map(|c| {
-                if c.is_ascii_graphic() {
+                if c.is_ascii_graphic() && c != b'"' && c != b'\\' {
                     (c as char).to_string()
                 } else {
                     format!("\\{:02x}", c)
@@ -88,7 +96,7 @@ impl TextLiterals {
 fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, instr: Instr) {
     match instr {
         Instr::PushInt { value } => fmt!(s, "(i64.const {})", value),
-        Instr::PushReal { value } => fmt!(s, "(f64.const {})", value),
+        Instr::PushReal { value } => fmt!(s, "(f64.const {})", real_to_str(value)),
         Instr::PushText { value } => txt_lits.gen_text_literal(s, value),
         Instr::PushBool { value } => fmt!(s, "(i32.const {})", value as i32),
         Instr::Drop { .. } => fmt!(s, "(drop)"),
@@ -115,7 +123,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
                 fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
                 for (i, tpe) in fields.iter().enumerate().rev() {
                     fmt!(s, "(global.set $tmp{})", type_to_str(tpe));
-                    fmt!(s, "(i64.store (i32.add (global.get $handy1) (i32.const {})) (global.get $tmp{}))", i * 8, type_to_str(tpe));
+                    fmt!(s, "({}.store (i32.add (global.get $handy1) (i32.const {})) (global.get $tmp{}))", type_to_str(tpe), i * 8, type_to_str(tpe));
                 }
                 fmt!(s, "(global.get $handy1)");
             }
@@ -147,7 +155,7 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
         Instr::IntToReal => fmt!(s, "(f64.convert_i64_s)"),
         Instr::IntToTextAscii => {
             fmt!(s, "(global.set $handy1 (call $malloc (i32.const 2)))");
-            fmt!(s, "(global.set $handy2 (i32.and (i32.const 255) (i32.wrap_i64)))");
+            fmt!(s, "(global.set $handy2 (i32.and (i32.wrap_i64) (i32.const 255)))");
             fmt!(s, "(i32.store16 (global.get $handy1) (global.get $handy2))");
             fmt!(s, "(global.get $handy1)");
         }
@@ -157,38 +165,33 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
         Instr::PrintReal => fmt!(s, "(call $print_real)(i32.const 0)"),
         Instr::PrintInt => fmt!(s, "(call $print_int)(i32.const 0)"),
         Instr::PrintBool => fmt!(s, "(call $print_int (i64.extend_i32_s))(i32.const 0)"),
-        Instr::NewArray { item: _item } => {
-            fmt!(s, "(global.set $handy2 (i32.wrap_i64))");
-            fmt!(s, "(global.set $handy1 (call $malloc (i32.add (i32.mul (global.get $handy2) (i32.const 8)) (i32.const 1))))");
-            fmt!(s, "(i64.store (global.get $handy1) (i64.extend_i32_s (global.get $handy2)))");
-            fmt!(s, "(global.get $handy1)");
-        }
+        Instr::NewArray { item: _item } => fmt!(s, "(call $new_array)"),
         Instr::LenArray { item: _item } => {
             fmt!(s, "(i64.load)");
         }
         Instr::GetArray { item } => {
-            fmt!(s, "(i32.shl (i32.add (i32.wrap_i64) (i32.const 1)) (i32.const 3))");
-            fmt!(s, "(i32.add)");
+            fmt!(s, "(call $array_addr)");
             fmt!(s, "({}.load)", type_to_str(&item));
         }
         Instr::SetArray { item } => {
             fmt!(s, "(global.set $tmp{})", type_to_str(&item));
-            fmt!(s, "(i32.add (i32.mul (i32.wrap_i64) (i32.const 8)) (i32.const 8))");
-            fmt!(s, "(i32.add)");
+            fmt!(s, "(call $array_addr)");
             fmt!(s, "(global.get $tmp{})", type_to_str(&item));
             fmt!(s, "({}.store)", type_to_str(&item));
         }
         Instr::GetText => {
-            fmt!(s, "(i32.wrap_i64)");
-            fmt!(s, "(i32.add)");
+            fmt!(s, "(call $text_addr)");
             fmt!(s, "(i64.load8_u)");
         }
         Instr::CatText => fmt!(s, "(call $strcat)"),
-        Instr::LtText => fmt!(s, "(call $strcmp_lt)"),
-        Instr::EqText => fmt!(s, "(call $strcmp_eq)"),
+        Instr::LtText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.lt_s)"),
+        Instr::LeText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.le_s)"),
+        Instr::GtText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.gt_s)"),
+        Instr::GeText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.ge_s)"),
+        Instr::EqText => fmt!(s, "(call $strcmp)(i32.eqz)"),
         Instr::LenText => fmt!(s, "(i64.extend_i32_s (call $strlen))"),
         Instr::MulInt => fmt!(s, "(i64.mul)"),
-        Instr::MulReal => fmt!(s, "(f64.add)"),
+        Instr::MulReal => fmt!(s, "(f64.mul)"),
         Instr::DivInt => fmt!(s, "(i64.div_s)"),
         Instr::DivReal => fmt!(s, "(f64.div)"),
         Instr::RemInt => fmt!(s, "(i64.rem_s)"),
@@ -197,8 +200,14 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
         Instr::SubInt => fmt!(s, "(i64.sub)"),
         Instr::SubReal => fmt!(s, "(f64.sub)"),
         Instr::LtInt => fmt!(s, "(i64.lt_s)"),
+        Instr::LeInt => fmt!(s, "(i64.le_s)"),
+        Instr::GtInt => fmt!(s, "(i64.gt_s)"),
+        Instr::GeInt => fmt!(s, "(i64.ge_s)"),
         Instr::EqInt => fmt!(s, "(i64.eq)"),
         Instr::LtReal => fmt!(s, "(f64.lt)"),
+        Instr::LeReal => fmt!(s, "(f64.le)"),
+        Instr::GtReal => fmt!(s, "(f64.gt)"),
+        Instr::GeReal => fmt!(s, "(f64.ge)"),
         Instr::EqReal => fmt!(s, "(f64.eq)"),
         Instr::LslInt => fmt!(s, "(i64.shl)"),
         Instr::LsrInt => fmt!(s, "(i64.shr_u)"),
@@ -209,7 +218,6 @@ fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals
         Instr::OrBool => fmt!(s, "(i32.or)"),
         Instr::XorInt => fmt!(s, "(i64.xor)"),
         Instr::XorBool => fmt!(s, "(i32.xor)"),
-        Instr::Abort => fmt!(s, "(unreachable)"),
     }
 }
 
@@ -274,42 +282,26 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
         (local.set $len (i32.add (local.get $len) (i32.const 1)))
         (br $loop)))
   (local.get $len))
-(func $strcmp_eq (param $a i32) (param $b i32) (result i32)
+(func $strcmp (param $a i32) (param $b i32) (result i32)
   (local $charA i32)
   (local $charB i32)
 
-  (block $not_equal
+  (block $differ
     (loop $loop
       (local.set $charA (i32.load8_u (local.get $a)))
       (local.set $charB (i32.load8_u (local.get $b)))
 
-      (br_if $not_equal (i32.ne (local.get $charA) (local.get $charB)))
-      (br_if 1 (i32.eqz (local.get $charA)))
+      (br_if $differ (i32.ne (local.get $charA) (local.get $charB)))
+      (if (i32.eqz (local.get $charA))
+        (then
+          (return (i32.const 0))))
 
       (local.set $a (i32.add (local.get $a) (i32.const 1)))
       (local.set $b (i32.add (local.get $b) (i32.const 1)))
-      (br $loop))
-    (i32.const 1)
-    return)
-  (i32.const 0))
-(func $strcmp_lt (param $a i32) (param $b i32) (result i32)
-  (local $charA i32)
-  (local $charB i32)
-
-  (block $gt_eq
-    (loop $loop
-      (local.set $charA (i32.load8_u (local.get $a)))
-      (local.set $charB (i32.load8_u (local.get $b)))
-
-      (br_if $gt_eq (i32.ge_u (local.get $charA) (local.get $charB)))
-      (br_if 1 (i32.eqz (local.get $charA)))
-
-      (local.set $a (i32.add (local.get $a) (i32.const 1)))
-      (local.set $b (i32.add (local.get $b) (i32.const 1)))
-      (br $loop))
-    (i32.const 1)
-    return)
-  (i32.const 0))
+      (br $loop)))
+  (i32.sub
+    (i32.gt_u (local.get $charA) (local.get $charB))
+    (i32.lt_u (local.get $charA) (local.get $charB))))
 
 (global $heap_ptr (mut i32) (i32.const 0))
 (func $malloc (param $size i32) (result i32)
@@ -329,7 +321,11 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
 
     (local.set $old_base (global.get $heap_ptr))
     (local.set $new_end (i32.add (local.get $old_base) (local.get $size)))
-    (local.set $need (i32.shr_u (i32.add (local.get $new_end) (i32.const 65535)) (i32.const 16)))
+    (if (i32.lt_u (local.get $new_end) (local.get $old_base))
+      (then
+        (unreachable)))
+
+    (local.set $need (i32.wrap_i64 (i64.shr_u (i64.add (i64.extend_i32_u (local.get $new_end)) (i64.const 65535)) (i64.const 16))))
     (local.set $need (i32.sub (local.get $need) (memory.size)))
 
     (if (i32.gt_s (local.get $need) (i32.const 0))
@@ -378,6 +374,27 @@ fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
       (i32.const 0))
     (local.get $dst))
 
+(func $new_array (param $len i64) (result i32)
+  (local $arr i32)
+  (if (i64.gt_u (local.get $len) (i64.const 0x0FFFFFFF))
+    (then
+      (unreachable)))
+  (local.set $arr (call $malloc (i32.add (i32.mul (i32.wrap_i64 (local.get $len)) (i32.const 8)) (i32.const 8))))
+  (i64.store (local.get $arr) (local.get $len))
+  (local.get $arr))
+
+(func $array_addr (param $arr i32) (param $i i64) (result i32)
+  (if (i64.ge_u (local.get $i) (i64.load (local.get $arr)))
+    (then
+      (unreachable)))
+  (i32.add (local.get $arr) (i32.add (i32.mul (i32.wrap_i64 (local.get $i)) (i32.const 8)) (i32.const 8))))
+
+(func $text_addr (param $text i32) (param $i i64) (result i32)
+  (if (i64.ge_u (local.get $i) (i64.extend_i32_u (call $strlen (local.get $text))))
+    (then
+      (unreachable)))
+  (i32.add (local.get $text) (i32.wrap_i64 (local.get $i))))
+
 (global $handy1 (mut i32) (i32.const 0))
 (global $handy2 (mut i32) (i32.const 0))
 (global $tmpf64 (mut f64) (f64.const 0.0))
@@ -407,35 +424,3 @@ pub fn generate(program: Program) -> String {
     gen_program(&mut s, program.funcs, program.entry);
     s
 }
-
-/*
-
-let memory = null;
-
-function print_text(ptr) {
-  const bytes = new Uint8Array(memory.buffer, ptr);
-  let str = "";
-  for (let i = 0; bytes[i] !== 0; i++) {
-    str += String.fromCharCode(bytes[i]);
-  }
-  console.log(str);
-}
-
-function print_real(num) {
-  console.log(num);
-}
-
-function print_ints(low, high) {
-  const big = BigInt(low >>> 0) | (BigInt(high) << 32n);
-  console.log(big.toString());
-}
-
-const wasmInstance =
-      new WebAssembly.Instance(wasmModule, { env: { print_text, print_real, print_ints, memory } });
-
-let main = wasmInstance.exports.main;
-memory = wasmInstance.exports.memory;
-main()
-
-
-*/

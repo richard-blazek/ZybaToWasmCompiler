@@ -229,6 +229,7 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
 
     let arr_t = Type::from(&expr.tpe());
     let val_t = arr_t.array_item();
+    let body_t = Type::from(&body.tpe());
 
     let key_id = l.define(key, Type::Int);
     let val_id = l.define(value, val_t.clone());
@@ -256,6 +257,7 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
 
             // Body
             gen_value(body, g, l),
+            [Instr::Drop { tpe: body_t }],
 
             // Increment
             [Instr::GetLocal { id: key_id, tpe: Type::Int }],
@@ -265,6 +267,18 @@ fn gen_for(key: String, value: String, expr: Value, body: Value, g: &mut Globals
             [Instr::RepeatLoop { id }]
         )  }],
         [Instr::NewTuple { fields: vec![] }]
+    )
+}
+
+fn gen_func_body(ret: &frontend::Type, body: Value, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    let tpe = Type::from(&body.tpe());
+    cat!(
+        gen_value(body, g, l),
+        if *ret == void() {
+            vec![Instr::Drop { tpe }, Instr::NewTuple { fields: vec![] }]
+        } else {
+            vec![]
+        }
     )
 }
 
@@ -291,22 +305,14 @@ fn gen_lambda(args: Vec<(String, frontend::Type)>, ret: frontend::Type, body: Va
         captures_open.push((inner_id, tpe));
     }
 
-    let tpe = Type::from(&body.tpe());
     let ret_t = Type::from(&ret);
-    let body = gen_value(body, g, &mut inner);
+    let code = gen_func_body(&ret, body, g, &mut inner);
 
     let mut locals = inner.get_types();
     locals.drain(0..(args.len() + captures_open.len()));
 
     let func = Func {
-        code: cat!(
-            body,
-            if ret == void() {
-                vec![Instr::Drop { tpe }, Instr::NewTuple { fields: vec![] }]
-            } else {
-                vec![]
-            }
-        ),
+        code,
         args: args.clone(),
         ret: ret_t.clone(),
         captures: captures_open,
@@ -350,28 +356,34 @@ fn gen_binary_op(op: Instr, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -
 }
 
 fn cmp_instr(op: &str, t: &frontend::Type) -> Instr {
+    use frontend::Type::*;
+
     match (op, t) {
-        ("==", frontend::Type::Int) => Instr::EqInt,
-        ("<", frontend::Type::Int) => Instr::LtInt,
-        ("==", frontend::Type::Real) => Instr::EqReal,
-        ("<", frontend::Type::Real) => Instr::LtReal,
-        ("==", frontend::Type::Text) => Instr::EqText,
-        ("<", frontend::Type::Text) => Instr::LtText,
+        ("==", Int) => Instr::EqInt,
+        ("<", Int) => Instr::LtInt,
+        ("<=", Int) => Instr::LeInt,
+        (">", Int) => Instr::GtInt,
+        (">=", Int) => Instr::GeInt,
+        ("==", Real) => Instr::EqReal,
+        ("<", Real) => Instr::LtReal,
+        ("<=", Real) => Instr::LeReal,
+        (">", Real) => Instr::GtReal,
+        (">=", Real) => Instr::GeReal,
+        ("==", Text) => Instr::EqText,
+        ("<", Text) => Instr::LtText,
+        ("<=", Text) => Instr::LeText,
+        (">", Text) => Instr::GtText,
+        (">=", Text) => Instr::GeText,
         _ => unreachable!()
     }
 }
 
-fn gen_cmp(op: &str, t: &frontend::Type, mut args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
-    let (_, instr, not) = match op {
-        "==" => ({}, cmp_instr("==", t), vec![]),
-        "!=" => ({}, cmp_instr("==", t), vec![Instr::NotBool]),
-        "<" => ({}, cmp_instr("<", t), vec![]),
-        ">=" => ({}, cmp_instr("<", t), vec![Instr::NotBool]),
-        ">" => (args.reverse(), cmp_instr("<", t), vec![]),
-        "<=" => (args.reverse(), cmp_instr("<", t), vec![Instr::NotBool]),
-        _ => unreachable!(),
-    };
-    cat!(gen_binary_op(instr, args, g, l), not)
+fn gen_cmp(op: &str, t: &frontend::Type, args: Vec<Value>, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
+    if op == "!=" {
+        cat!(gen_binary_op(cmp_instr("==", t), args, g, l), [Instr::NotBool])
+    } else {
+        gen_binary_op(cmp_instr(op, t), args, g, l)
+    }
 }
 
 fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Globals, l: &mut Locals) -> Vec<Instr> {
@@ -486,19 +498,17 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
 
             for key in keys {
                 if f2.contains_key(key) {
-                    let tpe = Type::from(&f2[key]);
-                    fields.push(tpe.clone());
+                    fields.push(Type::from(&f2[key]));
 
-                    code.push(Instr::GetLocal { id: loc2, tpe });
+                    code.push(Instr::GetLocal { id: loc2, tpe: tpe2.clone() });
                     code.push(Instr::GetField {
                         fields: fields2.clone(),
                         i: key_indices2[key]
                     });
                 } else {
-                    let tpe = Type::from(&f1[key]);
-                    fields.push(tpe.clone());
+                    fields.push(Type::from(&f1[key]));
 
-                    code.push(Instr::GetLocal { id: loc1, tpe });
+                    code.push(Instr::GetLocal { id: loc1, tpe: tpe1.clone() });
                     code.push(Instr::GetField {
                         fields: fields1.clone(),
                         i: key_indices1[key]
@@ -513,9 +523,9 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         }
         ("int", [Bool]) => gen_value(Value::If {
             cond: Box::new(first(args)),
-            then: Box::new(Value::Bool { value: true, tpe: Bool }),
-            elsë: Box::new(Value::Bool { value: true, tpe: Bool }),
-            tpe: Bool
+            then: Box::new(Value::Int { value: 1, tpe: Int }),
+            elsë: Box::new(Value::Int { value: 0, tpe: Int }),
+            tpe: Int
         }, g, l),
         ("int", [Real]) => cat!(
             gen_value(first(args), g, l), [Instr::RealToInt]
@@ -538,20 +548,38 @@ fn gen_builtin(op: String, args: Vec<Value>, tpe: frontend::Type, g: &mut Global
         ("chr", [Int]) => cat!(
             gen_value(first(args), g, l), [Instr::IntToTextAscii]
         ),
+        ("print", []) => vec![Instr::NewTuple { fields: vec![] }],
         ("print", _) => {
-            args.into_iter().flat_map(|arg| {
+            let print_instr = |tpe: &frontend::Type| match tpe {
+                Int => Instr::PrintInt,
+                Real => Instr::PrintReal,
+                Text => Instr::PrintText,
+                Bool => Instr::PrintBool,
+                _ => unreachable!()
+            };
+            let mut args = args;
+            let last = args.pop().unwrap();
+            let last_t = last.tpe();
+
+            // All arguments are evaluated before anything is printed: all but
+            // the last one are kept in temporaries, the last one on the stack
+            let mut code = vec![];
+            let mut temps = vec![];
+            for arg in args {
                 let tpe = arg.tpe();
-                cat!(
-                    gen_value(arg, g, l),
-                    match tpe {
-                        Int => [Instr::PrintInt],
-                        Real => [Instr::PrintReal],
-                        Text => [Instr::PrintText],
-                        Bool => [Instr::PrintBool],
-                        _ => unreachable!()
-                    }
-                )
-            }).collect()
+                let id = l.alloc(Type::from(&tpe));
+                code.extend(gen_value(arg, g, l));
+                code.push(Instr::SetLocal { id, tpe: Type::from(&tpe) });
+                temps.push((id, tpe));
+            }
+            code.extend(gen_value(last, g, l));
+            for (id, tpe) in temps {
+                code.push(Instr::GetLocal { id, tpe: Type::from(&tpe) });
+                code.push(print_instr(&tpe));
+                code.push(Instr::Drop { tpe: Type::Tuple(vec![]) });
+            }
+            code.push(print_instr(&last_t));
+            code
         }
         ("array", [Int]) => {
             let item_t = Type::from(&tpe).array_item();
@@ -638,7 +666,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Program {
                     arg_types.push(tpe);
                 }
 
-                let code = gen_value(*body, &mut g, &mut l);
+                let code = gen_func_body(&ret, *body, &mut g, &mut l);
                 let mut locals = l.get_types();
                 locals.drain(0..args_len);
 

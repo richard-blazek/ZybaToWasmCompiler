@@ -100,8 +100,8 @@ pub enum Instr {
     CallFunc { args: Vec<Type>, ret: Type },
 
     // global function fn with id=id (different from local variable id)
-    // stack before: [any, c1 of type=capture[0], .., cN of type=capture[N-1]]
-    // stack after:  [any, fn stored including the captured parameters]
+    // stack before: [any]
+    // stack after:  [any, fn stored including the captures]
     BindFunc { id: usize, args: Vec<Type>, ret: Type, captures: Vec<(usize, Type)> },
 
     // stack before: [any, value1]
@@ -113,7 +113,7 @@ pub enum Instr {
     NotBool,
 
     // stack before: [any, value]
-    // stack after:  [any]
+    // stack after:  [any, void]
     // prints value
     PrintText,
     PrintReal,
@@ -160,10 +160,19 @@ pub enum Instr {
     SubInt,
     SubReal,
     LtInt,
+    LeInt,
+    GtInt,
+    GeInt,
     EqInt,
     LtReal,
+    LeReal,
+    GtReal,
+    GeReal,
     EqReal,
     LtText,
+    LeText,
+    GtText,
+    GeText,
     EqText,
     LslInt,
     LsrInt,
@@ -173,9 +182,7 @@ pub enum Instr {
     OrInt,
     OrBool,
     XorInt,
-    XorBool,
-
-    Abort
+    XorBool
 }
 
 #[derive(Debug, Clone, PartialEq)]
