@@ -1,201 +1,118 @@
-use crate::frontend;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Type {
+    I64,
+    F64,
+    Addr,
+    Bool
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
-    Int,
-    Real,
-    Text,
-    Bool,
-    Array(Box<Type>),
-    Func(Vec<Type>, Box<Type>),
-    Tuple(Vec<Type>)
+pub struct Signature {
+    pub params: Vec<Type>,
+    pub results: Vec<Type>
 }
 
-impl Type {
-    pub fn from(t: &frontend::Type) -> Type {
-        use crate::midend::utils::sorted;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntBinOp { Add, Sub, Mul, DivS, RemS, And, Or, Xor, Shl, ShrS, ShrU }
 
-        match t {
-            frontend::Type::Int => Type::Int,
-            frontend::Type::Real => Type::Real,
-            frontend::Type::Text => Type::Text,
-            frontend::Type::Bool => Type::Bool,
-            frontend::Type::Array { item } => Type::Array(
-                Box::new(Type::from(&**item))
-            ),
-            frontend::Type::Func { args, ret } => Type::Func(
-                args.into_iter().map(Type::from).collect(),
-                Box::new(Type::from(&**ret))
-            ),
-            frontend::Type::Record { fields } => {
-                let vec: Vec<_> = sorted(fields, |(n, _)| n);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RealBinOp { Add, Sub, Mul, Div }
 
-                Type::Tuple(vec.into_iter().map(|(_, t)| {
-                    Type::from(t)
-                }).collect())
-            }
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoolBinOp { And, Or, Xor, Eq }
 
-    pub fn array_item(&self) -> Type {
-        match self {
-            Type::Array(item) => *item.clone(),
-            _ => unreachable!()
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp { Eq, Ne, Lt, Le, Gt, Ge }
 
-    pub fn tuple_fields(&self) -> Vec<Type> {
-        match self {
-            Type::Tuple(items) => items.clone(),
-            _ => unreachable!()
-        }
+#[derive(Debug, Clone, PartialEq)]
+pub enum Op {
+    ConstI64(i64),
+    ConstF64(f64),
+    ConstBool(bool),
+    NullAddr,
+
+    // Address of the static data with the given index
+    DataAddr(usize),
+
+    // Code address of the function with the given index
+    FuncAddr(usize),
+
+    IntBin(IntBinOp, usize, usize),
+    IntCmp(CmpOp, usize, usize),
+    RealBin(RealBinOp, usize, usize),
+    RealCmp(CmpOp, usize, usize),
+    BoolBin(BoolBinOp, usize, usize),
+    BoolNot(usize),
+
+    I64ToF64(usize),
+    F64ToI64(usize),
+    BoolToI64(usize),
+
+    // addr + i64 byte offset
+    AddrAdd(usize, usize),
+
+
+    Alloc(usize),
+    Load { ty: Type, addr: usize, offset: u32 },
+    Store { ty: Type, addr: usize, offset: u32, value: usize },
+    LoadU8 { addr: usize, offset: u32 },
+    StoreU8 { addr: usize, offset: u32, value: usize },
+
+    // `func` is a function index
+    Call { func: usize, args: Vec<usize> },
+
+    // `callee` is a code address produced by FuncAddr
+    CallIndirect { callee: usize, sig: Signature, args: Vec<usize> },
+
+    PrintInt(usize),
+    PrintReal(usize),
+    PrintText(usize),
+
+    Abort,
+    If { cond: usize, then: Block, elsë: Block },
+
+    // A do-while loop. `params` are defined inside `body` and initialised
+    // from `inits`. The body yields a bool followed by values of the params'
+    // types: if the bool is true, they become the params of the next
+    // iteration, otherwise the results of the instruction.
+    Loop { params: Vec<usize>, inits: Vec<usize>, body: Block }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instr {
+    pub results: Vec<usize>,
+    pub op: Op
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub instrs: Vec<Instr>,
+    pub yields: Vec<usize>
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Function {
+    pub name: String,
+    pub sig: Signature,
+    pub params: Vec<usize>,
+    pub body: Block,
+    pub types: Vec<Type>
+}
+
+impl Function {
+    pub fn type_of(&self, v: usize) -> Type {
+        self.types[v]
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Instr {
-    // stack before: [any]
-    // stack after:  [any, value]
-    PushInt { value: i64 },
-    PushReal { value: f64 },
-    PushText { value: String },
-    PushBool { value: bool },
-
-    // stack before: [any, value of type=tpe]
-    // stack after:  [any]
-    Drop { tpe: Type },
-
-    // defines a label above/below a block of instruction
-    Loop { id: usize, inner: Vec<Instr> },
-    Ifte { then: Vec<Instr>, elsë: Vec<Instr>, ret: Type },
-
-    // jump to the label with the given id
-    RepeatLoop { id: usize },
-
-    // stack before: [any, bool]
-    // stack after:  [any]
-    // if bool is true, jump to the bottom label with the given id
-    QuitIf { id: usize },
-
-    // stack before: [any, fields[0], .., fields[N-1]]
-    // stack after:  [any, { fields[0], .., fields[N-1] }]
-    NewTuple { fields: Vec<Type> },
-
-    // stack before: [any, { fields[0], .., fields[N-1] }]
-    // stack after:  [any, fields[i]]
-    GetField { fields: Vec<Type>, i: usize },
-
-    // the local with type=tpe, id=id and a value=value
-    // stack before: [any]
-    // stack after: [any, value]
-    GetLocal { id: usize, tpe: Type },
-
-    // stack before: [any, value]
-    // stack after: [any]
-    // the local with type=tpe, id=id will be set to the given value
-    SetLocal { id: usize, tpe: Type },
-
-    // stack before: [any, a1 of type=args[0], .., aN of type=args[N-1]]
-    // stack after:  [any, result of type=ret]
-    CallFunc { args: Vec<Type>, ret: Type },
-
-    // global function fn with id=id (different from local variable id)
-    // stack before: [any]
-    // stack after:  [any, fn stored including the captures]
-    BindFunc { id: usize, args: Vec<Type>, ret: Type, captures: Vec<(usize, Type)> },
-
-    // stack before: [any, value1]
-    // stack after:  [any, value2]
-    RealToInt,
-    IntToReal,
-    IntToTextAscii,
-    NotInt,
-    NotBool,
-
-    // stack before: [any, value]
-    // stack after:  [any, void]
-    // prints value
-    PrintText,
-    PrintReal,
-    PrintInt,
-    PrintBool,
-
-    // stack before: [any, len]
-    // stack after:  [any, array of length=len]
-    NewArray { item: Type },
-
-    // stack before: [any, array of length=len]
-    // stack after:  [any, len]
-    LenArray { item: Type },
-
-    // stack before: [any, array, i]
-    // stack after:  [any, array[i]]
-    GetArray { item: Type },
-
-    // stack before: [any, array, i, value of type=item]
-    // stack after:  [any]
-    SetArray { item: Type },
-
-    // stack before: [any, text of length=len]
-    // stack after:  [any, len]
-    LenText,
-
-    // stack before: [any, text, i]
-    // stack after:  [any, text[i] as Int]
-    GetText,
-
-    // stack before: [any, text1, text2]
-    // stack after:  [any, text1 + text2]
-    CatText,
-
-    // stack before: [any, value1, value2]
-    // stack after:  [any, value1 op value2]
-    MulInt,
-    MulReal,
-    DivInt,
-    DivReal,
-    RemInt,
-    AddInt,
-    AddReal,
-    SubInt,
-    SubReal,
-    LtInt,
-    LeInt,
-    GtInt,
-    GeInt,
-    EqInt,
-    LtReal,
-    LeReal,
-    GtReal,
-    GeReal,
-    EqReal,
-    LtText,
-    LeText,
-    GtText,
-    GeText,
-    EqText,
-    LslInt,
-    LsrInt,
-    AsrInt,
-    AndInt,
-    AndBool,
-    OrInt,
-    OrBool,
-    XorInt,
-    XorBool
+pub struct Data {
+    pub bytes: Vec<u8>
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Func {
-    pub code: Vec<Instr>,
-    pub args: Vec<Type>,
-    pub ret: Type,
-    pub captures: Vec<(usize, Type)>,
-    pub locals: Vec<Type>
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Program {
-    pub funcs: Vec<Func>,
-    pub entry: usize
+pub struct Module {
+    pub funcs: Vec<Function>,
+    pub data: Vec<Data>,
+    pub main_fn: usize
 }

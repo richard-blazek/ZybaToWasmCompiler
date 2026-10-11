@@ -1,426 +1,362 @@
 use std::collections::HashMap;
 
-use crate::midend::{Func, Instr, Program, Type};
+use crate::midend::*;
 
 macro_rules! fmt {
-    ($s:tt, $($arg:tt)*) => {
+    ($s:expr, $($arg:tt)*) => {
         ($s).push_str(&format!($($arg)*))
     }
 }
 
-fn type_to_str(tpe: &Type) -> &str {
-    match tpe {
-        Type::Int => "i64",
-        Type::Real => "f64",
-        _ => "i32",
-    }
-}
-
-fn real_to_str(value: f64) -> String {
-    if value.is_nan() {
-        "nan".to_string()
-    } else {
-        value.to_string()
-    }
-}
-
-struct FnTypes {
-    map: HashMap<(Vec<String>, String), String>
-}
-
-impl FnTypes {
-    fn type_of(&mut self, args: &Vec<Type>, ret: &Type) -> String {
-        let args = args.iter().map(|arg| {
-            type_to_str(arg).to_string()
-        }).collect::<Vec<_>>();
-        let ret = type_to_str(ret).to_string();
-
-        if let Some(typename) = self.map.get(&(args.clone(), ret.clone())) {
-            typename.clone()
-        } else {
-            let idx = format!("fn_type_{}", self.map.len());
-            self.map.insert((args, ret), idx.clone());
-            idx
-        }
-    }
-
-    fn gen_signatures(&self, s: &mut String) {
-        for ((args, ret), typename) in self.map.iter() {
-            fmt!(s, "(type ${} (func ", typename);
-            if !args.is_empty() {
-                fmt!(s, "(param");
-                for arg in args {
-                    fmt!(s, " {}", arg);
-                }
-                fmt!(s, ") ");
-            }
-            fmt!(s, "(result {})", ret);
-            fmt!(s, "))");
-        }
-    }
-}
-
-struct TextLiterals {
-    literals: HashMap<String, i32>,
-    offset: i32
-}
-
-impl TextLiterals {
-    fn gen_text_literal(&mut self, s: &mut String, lit: String) {
-        let offset = if !self.literals.contains_key(&lit) {
-            let offset = self.offset;
-            self.offset += lit.len() as i32 + 1;
-            self.literals.insert(lit, offset);
-            offset
-        } else {
-            self.literals[&lit]
-        };
-        fmt!(s, "(i32.const {})", offset);
-    }
-
-    fn gen_memory(&self, s: &mut String) {
-        fmt!(s, "(memory (export \"memory\") {})", (self.offset >> 16) + 1);
-        for (literal, offset) in self.literals.iter() {
-            let escaped: String = literal.bytes().map(|c| {
-                if c.is_ascii_graphic() && c != b'"' && c != b'\\' {
-                    (c as char).to_string()
-                } else {
-                    format!("\\{:02x}", c)
-                }
-            }).collect();
-            fmt!(s, "(data (i32.const {}) \"{}\\00\")", offset, escaped);
-        }
-    }
-}
-
-fn gen_instr(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, instr: Instr) {
-    match instr {
-        Instr::PushInt { value } => fmt!(s, "(i64.const {})", value),
-        Instr::PushReal { value } => fmt!(s, "(f64.const {})", real_to_str(value)),
-        Instr::PushText { value } => txt_lits.gen_text_literal(s, value),
-        Instr::PushBool { value } => fmt!(s, "(i32.const {})", value as i32),
-        Instr::Drop { .. } => fmt!(s, "(drop)"),
-        Instr::Loop { id, inner } => {
-            fmt!(s, "(block $block_{} ", id);
-            fmt!(s, "(loop $loop_{} ", id);
-            gen_instrs(s, fn_types, txt_lits, inner);
-            fmt!(s, "))");
-        }
-        Instr::Ifte { then, elsë, ret } => {
-            fmt!(s, "(if (result {})", type_to_str(&ret));
-            fmt!(s, "(then ");
-            gen_instrs(s, fn_types, txt_lits, then);
-            fmt!(s, ")(else ");
-            gen_instrs(s, fn_types, txt_lits, elsë);
-            fmt!(s, "))");
-        }
-        Instr::RepeatLoop { id } => fmt!(s, "(br $loop_{})", id),
-        Instr::QuitIf { id } => fmt!(s, "(br_if $block_{})", id),
-        Instr::NewTuple { fields } => {
-            if fields.is_empty() {
-                fmt!(s, "(i32.const -1)")
-            } else {
-                fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", fields.len() * 8);
-                for (i, tpe) in fields.iter().enumerate().rev() {
-                    fmt!(s, "(global.set $tmp{})", type_to_str(tpe));
-                    fmt!(s, "({}.store (i32.add (global.get $handy1) (i32.const {})) (global.get $tmp{}))", type_to_str(tpe), i * 8, type_to_str(tpe));
-                }
-                fmt!(s, "(global.get $handy1)");
-            }
-        }
-        Instr::GetField { fields, i } => {
-            fmt!(s, "(i32.add (i32.const {}))", i * 8);
-            fmt!(s, "({}.load)", type_to_str(&fields[i]));
-        }
-        Instr::GetLocal { id, .. } => fmt!(s, "(local.get {})", id),
-        Instr::SetLocal { id, .. } => fmt!(s, "(local.set {})", id),
-        Instr::CallFunc { args, ret } => {
-            fmt!(s, "(global.set $handy1)");
-            fmt!(s, "(global.set $capture_ptr (i32.add (global.get $handy1) (i32.const 8)))");
-            fmt!(s, "(i32.load (global.get $handy1))");
-
-            fmt!(s, "(call_indirect (type ${}))", fn_types.type_of(&args, &ret));
-        }
-        Instr::BindFunc { id, captures, .. } => {
-            fmt!(s, "(global.set $handy1 (call $malloc (i32.const {})))", (captures.len() + 1) * 8);
-            fmt!(s, "(i32.store (global.get $handy1) (i32.const {}))", id);
-            for (i, (loc_id, tpe)) in captures.into_iter().enumerate() {
-                fmt!(s, "(i32.add (global.get $handy1) (i32.const {}))", (i + 1) * 8);
-                fmt!(s, "(local.get {})", loc_id);
-                fmt!(s, "({}.store)", type_to_str(&tpe));
-            }
-            fmt!(s, "(global.get $handy1)");
-        }
-        Instr::RealToInt => fmt!(s, "(i64.trunc_f64_s)"),
-        Instr::IntToReal => fmt!(s, "(f64.convert_i64_s)"),
-        Instr::IntToTextAscii => {
-            fmt!(s, "(global.set $handy1 (call $malloc (i32.const 2)))");
-            fmt!(s, "(global.set $handy2 (i32.and (i32.wrap_i64) (i32.const 255)))");
-            fmt!(s, "(i32.store16 (global.get $handy1) (global.get $handy2))");
-            fmt!(s, "(global.get $handy1)");
-        }
-        Instr::NotInt => fmt!(s, "(i64.xor (i64.const -1))"),
-        Instr::NotBool => fmt!(s, "(i32.eqz)"),
-        Instr::PrintText => fmt!(s, "(call $print_text)(i32.const 0)"),
-        Instr::PrintReal => fmt!(s, "(call $print_real)(i32.const 0)"),
-        Instr::PrintInt => fmt!(s, "(call $print_int)(i32.const 0)"),
-        Instr::PrintBool => fmt!(s, "(call $print_int (i64.extend_i32_s))(i32.const 0)"),
-        Instr::NewArray { item: _item } => fmt!(s, "(call $new_array)"),
-        Instr::LenArray { item: _item } => {
-            fmt!(s, "(i64.load)");
-        }
-        Instr::GetArray { item } => {
-            fmt!(s, "(call $array_addr)");
-            fmt!(s, "({}.load)", type_to_str(&item));
-        }
-        Instr::SetArray { item } => {
-            fmt!(s, "(global.set $tmp{})", type_to_str(&item));
-            fmt!(s, "(call $array_addr)");
-            fmt!(s, "(global.get $tmp{})", type_to_str(&item));
-            fmt!(s, "({}.store)", type_to_str(&item));
-        }
-        Instr::GetText => {
-            fmt!(s, "(call $text_addr)");
-            fmt!(s, "(i64.load8_u)");
-        }
-        Instr::CatText => fmt!(s, "(call $strcat)"),
-        Instr::LtText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.lt_s)"),
-        Instr::LeText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.le_s)"),
-        Instr::GtText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.gt_s)"),
-        Instr::GeText => fmt!(s, "(call $strcmp)(i32.const 0)(i32.ge_s)"),
-        Instr::EqText => fmt!(s, "(call $strcmp)(i32.eqz)"),
-        Instr::LenText => fmt!(s, "(i64.extend_i32_s (call $strlen))"),
-        Instr::MulInt => fmt!(s, "(i64.mul)"),
-        Instr::MulReal => fmt!(s, "(f64.mul)"),
-        Instr::DivInt => fmt!(s, "(i64.div_s)"),
-        Instr::DivReal => fmt!(s, "(f64.div)"),
-        Instr::RemInt => fmt!(s, "(i64.rem_s)"),
-        Instr::AddInt => fmt!(s, "(i64.add)"),
-        Instr::AddReal => fmt!(s, "(f64.add)"),
-        Instr::SubInt => fmt!(s, "(i64.sub)"),
-        Instr::SubReal => fmt!(s, "(f64.sub)"),
-        Instr::LtInt => fmt!(s, "(i64.lt_s)"),
-        Instr::LeInt => fmt!(s, "(i64.le_s)"),
-        Instr::GtInt => fmt!(s, "(i64.gt_s)"),
-        Instr::GeInt => fmt!(s, "(i64.ge_s)"),
-        Instr::EqInt => fmt!(s, "(i64.eq)"),
-        Instr::LtReal => fmt!(s, "(f64.lt)"),
-        Instr::LeReal => fmt!(s, "(f64.le)"),
-        Instr::GtReal => fmt!(s, "(f64.gt)"),
-        Instr::GeReal => fmt!(s, "(f64.ge)"),
-        Instr::EqReal => fmt!(s, "(f64.eq)"),
-        Instr::LslInt => fmt!(s, "(i64.shl)"),
-        Instr::LsrInt => fmt!(s, "(i64.shr_u)"),
-        Instr::AsrInt => fmt!(s, "(i64.shr_s)"),
-        Instr::AndInt => fmt!(s, "(i64.and)"),
-        Instr::AndBool => fmt!(s, "(i32.and)"),
-        Instr::OrInt => fmt!(s, "(i64.or)"),
-        Instr::OrBool => fmt!(s, "(i32.or)"),
-        Instr::XorInt => fmt!(s, "(i64.xor)"),
-        Instr::XorBool => fmt!(s, "(i32.xor)"),
-    }
-}
-
-fn gen_instrs(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, instrs: Vec<Instr>) {
-    for instr in instrs {
-        gen_instr(s, fn_types, txt_lits, instr);
-    }
-}
-
-fn gen_func(s: &mut String, fn_types: &mut FnTypes, txt_lits: &mut TextLiterals, i: usize, f: Func) {
-    fmt!(s, "(func $func_{} ", i);
-
-    if !f.args.is_empty() {
-        fmt!(s, "(param");
-        for arg in &f.args {
-            fmt!(s, " {}", type_to_str(arg));
-        }
-        fmt!(s, ") ");
-    }
-    fmt!(s, "(result {})", type_to_str(&f.ret));
-
-    if !f.captures.is_empty() || !f.locals.is_empty() {
-        fmt!(s, "(local");
-        for (_, loc_tpe) in &f.captures {
-            fmt!(s, " {}", type_to_str(loc_tpe));
-        }
-        for loc_tpe in &f.locals {
-            fmt!(s, " {}", type_to_str(loc_tpe));
-        }
-        fmt!(s, ")");
-    }
-
-    for (i, (loc_id, loc_tpe)) in f.captures.into_iter().enumerate() {
-        fmt!(s, "(local.set {} ({}.load (i32.add (global.get $capture_ptr) (i32.const {}))))", loc_id, type_to_str(&loc_tpe), i * 8);
-    }
-
-    gen_instrs(s, fn_types, txt_lits, f.code);
-    fmt!(s, ")");
-
-    fmt!(s, "(elem (i32.const {}) $func_{})", i, i);
-}
-
-fn gen_program(s: &mut String, funcs: Vec<Func>, entry: usize) {
-    fmt!(s, "(module
-(import \"env\" \"print_text\" (func $print_text (param i32)))
-(import \"env\" \"print_real\" (func $print_real (param f64)))
-(import \"env\" \"print_ints\" (func $print_ints (param i32 i32)))
+const PRELUDE: &str = r#"
+(import "env" "print_text" (func $print_text (param i32)))
+(import "env" "print_real" (func $print_real (param f64)))
+(import "env" "print_ints" (func $print_ints (param i32 i32)))
 
 (func $print_int (param $n i64)
   (call $print_ints
     (i32.wrap_i64 (local.get $n))
     (i32.wrap_i64 (i64.shr_u (local.get $n) (i64.const 32)))))
 
-(func $strlen (param $ptr i32) (result i32)
-  (local $len i32)
-  (local.set $len (i32.const 0))
-  (block $exit
-    (loop $loop
-      (i32.load8_u (local.get $ptr))
-        (br_if $exit (i32.eqz (i32.load8_u (local.get $ptr))))
-        (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
-        (local.set $len (i32.add (local.get $len) (i32.const 1)))
-        (br $loop)))
-  (local.get $len))
-(func $strcmp (param $a i32) (param $b i32) (result i32)
-  (local $charA i32)
-  (local $charB i32)
-
-  (block $differ
-    (loop $loop
-      (local.set $charA (i32.load8_u (local.get $a)))
-      (local.set $charB (i32.load8_u (local.get $b)))
-
-      (br_if $differ (i32.ne (local.get $charA) (local.get $charB)))
-      (if (i32.eqz (local.get $charA))
-        (then
-          (return (i32.const 0))))
-
-      (local.set $a (i32.add (local.get $a) (i32.const 1)))
-      (local.set $b (i32.add (local.get $b) (i32.const 1)))
-      (br $loop)))
-  (i32.sub
-    (i32.gt_u (local.get $charA) (local.get $charB))
-    (i32.lt_u (local.get $charA) (local.get $charB))))
-
 (global $heap_ptr (mut i32) (i32.const 0))
 (func $malloc (param $size i32) (result i32)
-    (local $old_base i32)
-    (local $new_end i32)
-    (local $need i32)
+  (local $old_base i32)
+  (local $new_end i32)
+  (local $need i32)
 
-    (if (i32.eqz (local.get $size))
-      (then
-        (local.set $size (i32.const 1))))
+  (if (i32.eqz (local.get $size))
+    (then
+      (local.set $size (i32.const 1))))
 
-    (local.set $size (i32.and (i32.add (local.get $size) (i32.const 7)) (i32.const -8)))
+  (local.set $size (i32.and (i32.add (local.get $size) (i32.const 7)) (i32.const -8)))
 
-    (if (i32.eqz (global.get $heap_ptr))
-      (then
-        (global.set $heap_ptr (i32.shl (memory.size) (i32.const 16)))))
+  (if (i32.eqz (global.get $heap_ptr))
+    (then
+      (global.set $heap_ptr (i32.shl (memory.size) (i32.const 16)))))
 
-    (local.set $old_base (global.get $heap_ptr))
-    (local.set $new_end (i32.add (local.get $old_base) (local.get $size)))
-    (if (i32.lt_u (local.get $new_end) (local.get $old_base))
-      (then
-        (unreachable)))
-
-    (local.set $need (i32.wrap_i64 (i64.shr_u (i64.add (i64.extend_i32_u (local.get $new_end)) (i64.const 65535)) (i64.const 16))))
-    (local.set $need (i32.sub (local.get $need) (memory.size)))
-
-    (if (i32.gt_s (local.get $need) (i32.const 0))
-      (then
-        (if (i32.eq (memory.grow (local.get $need)) (i32.const -1))
-          (then
-            (unreachable)))))
-
-    (global.set $heap_ptr (local.get $new_end))
-    (local.get $old_base))
-
-  (func $strcat (param $a i32) (param $b i32) (result i32)
-    (local $lenA i32)
-    (local $lenB i32)
-    (local $total i32)
-    (local $dst i32)
-    (local $i i32)
-
-    (local.set $lenA (call $strlen (local.get $a)))
-    (local.set $lenB (call $strlen (local.get $b)))
-    (local.set $total (i32.add (i32.add (local.get $lenA) (local.get $lenB)) (i32.const 1)))
-    (local.set $dst (call $malloc (local.get $total)))
-
-    (local.set $i (i32.const 0))
-    (block $copy_a_done
-      (loop $copy_a
-        (br_if $copy_a_done (i32.ge_u (local.get $i) (local.get $lenA)))
-        (i32.store8
-          (i32.add (local.get $dst) (local.get $i))
-          (i32.load8_u (i32.add (local.get $a) (local.get $i))))
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $copy_a)))
-
-    (local.set $i (i32.const 0))
-    (block $copy_b_done
-      (loop $copy_b
-        (br_if $copy_b_done (i32.ge_u (local.get $i) (local.get $lenB)))
-        (i32.store8
-          (i32.add (local.get $dst) (i32.add (local.get $lenA) (local.get $i)))
-          (i32.load8_u (i32.add (local.get $b) (local.get $i))))
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $copy_b)))
-
-    (i32.store8
-      (i32.add (local.get $dst) (i32.add (local.get $lenA) (local.get $lenB)))
-      (i32.const 0))
-    (local.get $dst))
-
-(func $new_array (param $len i64) (result i32)
-  (local $arr i32)
-  (if (i64.gt_u (local.get $len) (i64.const 0x0FFFFFFF))
+  (local.set $old_base (global.get $heap_ptr))
+  (local.set $new_end (i32.add (local.get $old_base) (local.get $size)))
+  (if (i32.lt_u (local.get $new_end) (local.get $old_base))
     (then
       (unreachable)))
-  (local.set $arr (call $malloc (i32.add (i32.mul (i32.wrap_i64 (local.get $len)) (i32.const 8)) (i32.const 8))))
-  (i64.store (local.get $arr) (local.get $len))
-  (local.get $arr))
 
-(func $array_addr (param $arr i32) (param $i i64) (result i32)
-  (if (i64.ge_u (local.get $i) (i64.load (local.get $arr)))
+  (local.set $need (i32.wrap_i64 (i64.shr_u (i64.add (i64.extend_i32_u (local.get $new_end)) (i64.const 65535)) (i64.const 16))))
+  (local.set $need (i32.sub (local.get $need) (memory.size)))
+
+  (if (i32.gt_s (local.get $need) (i32.const 0))
+    (then
+      (if (i32.eq (memory.grow (local.get $need)) (i32.const -1))
+        (then
+          (unreachable)))))
+
+  (global.set $heap_ptr (local.get $new_end))
+  (local.get $old_base))
+
+(func $alloc (param $size i64) (result i32)
+  (if (i64.gt_u (local.get $size) (i64.const 0x7FFFFFFF))
     (then
       (unreachable)))
-  (i32.add (local.get $arr) (i32.add (i32.mul (i32.wrap_i64 (local.get $i)) (i32.const 8)) (i32.const 8))))
+  (call $malloc (i32.wrap_i64 (local.get $size))))
+"#;
 
-(func $text_addr (param $text i32) (param $i i64) (result i32)
-  (if (i64.ge_u (local.get $i) (i64.extend_i32_u (call $strlen (local.get $text))))
-    (then
-      (unreachable)))
-  (i32.add (local.get $text) (i32.wrap_i64 (local.get $i))))
+// Static data starts here so that address 0 stays the null address
+const DATA_START: usize = 8;
 
-(global $handy1 (mut i32) (i32.const 0))
-(global $handy2 (mut i32) (i32.const 0))
-(global $tmpf64 (mut f64) (f64.const 0.0))
-(global $tmpi32 (mut i32) (i32.const 0))
-(global $tmpi64 (mut i64) (i64.const 0))
-(global $capture_ptr (mut i32) (i32.const 0))
-");
-
-    fmt!(s, "(table $table {} funcref)", funcs.len());
-
-    let mut fn_types = FnTypes { map: HashMap::new() };
-    let mut txt_lits = TextLiterals { offset: 0, literals: HashMap::new() };
-
-    for (i, func) in funcs.into_iter().enumerate() {
-        gen_func(s, &mut fn_types, &mut txt_lits, i, func);
+fn wasm_type(ty: Type) -> &'static str {
+    match ty {
+        Type::I64 => "i64",
+        Type::F64 => "f64",
+        Type::Addr | Type::Bool => "i32"
     }
-
-    fn_types.gen_signatures(s);
-    txt_lits.gen_memory(s);
-
-    fmt!(s, "(func (export \"main\") (call $func_{}) (drop))", entry);
-    fmt!(s, ") ");
 }
 
-pub fn generate(program: Program) -> String {
-    let mut s = String::new();
-    gen_program(&mut s, program.funcs, program.entry);
+fn wasm_types(tys: &[Type]) -> Vec<&'static str> {
+    tys.iter().map(|t| wasm_type(*t)).collect()
+}
+
+fn escape(bytes: &[u8]) -> String {
+    bytes.iter().map(|&c| {
+        if c.is_ascii_graphic() && c != b'"' && c != b'\\' {
+            (c as char).to_string()
+        } else {
+            format!("\\{:02x}", c)
+        }
+    }).collect()
+}
+
+struct SigTypes {
+    map: HashMap<(Vec<&'static str>, Vec<&'static str>), usize>
+}
+
+impl SigTypes {
+    fn id(&mut self, sig: &Signature) -> usize {
+        let key = (wasm_types(&sig.params), wasm_types(&sig.results));
+        let next = self.map.len();
+        *self.map.entry(key).or_insert(next)
+    }
+
+    fn emit(&self, s: &mut String) {
+        let mut sigs: Vec<_> = self.map.iter().collect();
+        sigs.sort_by_key(|(_, id)| **id);
+        for ((params, results), id) in sigs {
+            fmt!(s, "(type $sig{} (func", id);
+            for p in params {
+                fmt!(s, " (param {})", p);
+            }
+            for r in results {
+                fmt!(s, " (result {})", r);
+            }
+            fmt!(s, "))\n");
+        }
+    }
+}
+
+struct FuncGen<'a> {
+    s: &'a mut String,
+    sigs: &'a mut SigTypes,
+    data_offsets: &'a [usize],
+    func: &'a Function,
+    loop_count: usize,
+    indent: usize
+}
+
+fn get(v: usize) -> String {
+    format!("(local.get $v{})", v)
+}
+
+fn int_bin(op: IntBinOp) -> &'static str {
+    match op {
+        IntBinOp::Add => "i64.add",
+        IntBinOp::Sub => "i64.sub",
+        IntBinOp::Mul => "i64.mul",
+        IntBinOp::DivS => "i64.div_s",
+        IntBinOp::RemS => "i64.rem_s",
+        IntBinOp::And => "i64.and",
+        IntBinOp::Or => "i64.or",
+        IntBinOp::Xor => "i64.xor",
+        IntBinOp::Shl => "i64.shl",
+        IntBinOp::ShrS => "i64.shr_s",
+        IntBinOp::ShrU => "i64.shr_u"
+    }
+}
+
+fn int_cmp(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "i64.eq",
+        CmpOp::Ne => "i64.ne",
+        CmpOp::Lt => "i64.lt_s",
+        CmpOp::Le => "i64.le_s",
+        CmpOp::Gt => "i64.gt_s",
+        CmpOp::Ge => "i64.ge_s"
+    }
+}
+
+fn real_bin(op: RealBinOp) -> &'static str {
+    match op {
+        RealBinOp::Add => "f64.add",
+        RealBinOp::Sub => "f64.sub",
+        RealBinOp::Mul => "f64.mul",
+        RealBinOp::Div => "f64.div"
+    }
+}
+
+fn real_cmp(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "f64.eq",
+        CmpOp::Ne => "f64.ne",
+        CmpOp::Lt => "f64.lt",
+        CmpOp::Le => "f64.le",
+        CmpOp::Gt => "f64.gt",
+        CmpOp::Ge => "f64.ge"
+    }
+}
+
+fn bool_bin(op: BoolBinOp) -> &'static str {
+    match op {
+        BoolBinOp::And => "i32.and",
+        BoolBinOp::Or => "i32.or",
+        BoolBinOp::Xor => "i32.xor",
+        BoolBinOp::Eq => "i32.eq"
+    }
+}
+
+impl<'a> FuncGen<'a> {
+    fn line(&mut self, text: &str) {
+        for _ in 0..self.indent {
+            self.s.push_str("  ");
+        }
+        self.s.push_str(text);
+        self.s.push('\n');
+    }
+
+    fn assign(&mut self, targets: &[usize], values: &[usize]) {
+        for v in values {
+            self.line(&get(*v));
+        }
+        for t in targets.iter().rev() {
+            self.line(&format!("(local.set $v{})", t));
+        }
+    }
+
+    fn instrs(&mut self, block: &Block) {
+        for instr in &block.instrs {
+            self.instr(instr);
+        }
+    }
+
+    fn block(&mut self, block: &Block, yield_to: &[usize]) {
+        self.indent += 1;
+        self.instrs(block);
+        self.assign(yield_to, &block.yields);
+        self.indent -= 1;
+    }
+
+    fn expr(&mut self, op: &Op) -> String {
+        let ty = |t: &Type| wasm_type(*t);
+        match op {
+            Op::ConstI64(v) => format!("(i64.const {})", v),
+            Op::ConstF64(v) => format!("(f64.reinterpret_i64 (i64.const {}))", v.to_bits() as i64),
+            Op::ConstBool(v) => format!("(i32.const {})", *v as i32),
+            Op::NullAddr => "(i32.const 0)".to_string(),
+            Op::DataAddr(id) => format!("(i32.const {})", self.data_offsets[*id]),
+            Op::FuncAddr(id) => format!("(i32.const {})", id),
+            Op::IntBin(op, a, b) => format!("({} {} {})", int_bin(*op), get(*a), get(*b)),
+            Op::IntCmp(op, a, b) => format!("({} {} {})", int_cmp(*op), get(*a), get(*b)),
+            Op::RealBin(op, a, b) => format!("({} {} {})", real_bin(*op), get(*a), get(*b)),
+            Op::RealCmp(op, a, b) => format!("({} {} {})", real_cmp(*op), get(*a), get(*b)),
+            Op::BoolBin(op, a, b) => format!("({} {} {})", bool_bin(*op), get(*a), get(*b)),
+            Op::BoolNot(a) => format!("(i32.eqz {})", get(*a)),
+            Op::I64ToF64(a) => format!("(f64.convert_i64_s {})", get(*a)),
+            Op::F64ToI64(a) => format!("(i64.trunc_f64_s {})", get(*a)),
+            Op::BoolToI64(a) => format!("(i64.extend_i32_u {})", get(*a)),
+            Op::AddrAdd(a, b) => format!("(i32.add {} (i32.wrap_i64 {}))", get(*a), get(*b)),
+            Op::Alloc(size) => format!("(call $alloc {})", get(*size)),
+            Op::Load { ty: t, addr, offset } => format!("({}.load offset={} {})", ty(t), offset, get(*addr)),
+            Op::Store { ty: t, addr, offset, value } => {
+                format!("({}.store offset={} {} {})", ty(t), offset, get(*addr), get(*value))
+            }
+            Op::LoadU8 { addr, offset } => format!("(i64.load8_u offset={} {})", offset, get(*addr)),
+            Op::StoreU8 { addr, offset, value } => {
+                format!("(i64.store8 offset={} {} {})", offset, get(*addr), get(*value))
+            }
+            Op::Call { func, args } => {
+                let args: String = args.iter().map(|a| format!(" {}", get(*a))).collect();
+                format!("(call $f{}{})", func, args)
+            }
+            Op::CallIndirect { callee, sig, args } => {
+                let args: String = args.iter().map(|a| format!(" {}", get(*a))).collect();
+                format!("(call_indirect (type $sig{}){} {})", self.sigs.id(sig), args, get(*callee))
+            }
+            Op::PrintInt(v) => format!("(call $print_int {})", get(*v)),
+            Op::PrintReal(v) => format!("(call $print_real {})", get(*v)),
+            Op::PrintText(v) => format!("(call $print_text {})", get(*v)),
+            Op::Abort => "(unreachable)".to_string(),
+            Op::If { .. } | Op::Loop { .. } => unreachable!()
+        }
+    }
+
+    fn instr(&mut self, instr: &Instr) {
+        match &instr.op {
+            Op::If { cond, then, elsë } => {
+                self.line(&format!("(if {}", get(*cond)));
+                self.indent += 1;
+                self.line("(then");
+                self.block(then, &instr.results);
+                self.line(")");
+                self.line("(else");
+                self.block(elsë, &instr.results);
+                self.line("))");
+                self.indent -= 1;
+            }
+            Op::Loop { params, inits, body } => {
+                let label = self.loop_count;
+                self.loop_count += 1;
+                self.assign(params, inits);
+                self.line(&format!("(loop $loop{}", label));
+                self.indent += 1;
+                self.instrs(body);
+
+                let (again, next) = body.yields.split_first().unwrap();
+                self.line(&get(*again));
+                self.assign(params, next);
+                self.line(&format!("(br_if $loop{}))", label));
+                self.indent -= 1;
+                self.assign(&instr.results, params);
+            }
+            op => {
+                let expr = self.expr(op);
+                match instr.results[..] {
+                    [] => self.line(&expr),
+                    [r] => self.line(&format!("(local.set $v{} {})", r, expr)),
+                    _ => unreachable!("multiple results")
+                }
+            }
+        }
+    }
+
+    fn function(&mut self, id: usize) {
+        let func = self.func;
+        let sig = self.sigs.id(&func.sig);
+        let mut header = format!("(func $f{} (type $sig{})", id, sig);
+        for p in &func.params {
+            fmt!(header, " (param $v{} {})", p, wasm_type(func.type_of(*p)));
+        }
+        for r in &func.sig.results {
+            fmt!(header, " (result {})", wasm_type(*r));
+        }
+        self.line(&format!("{} ;; {}", header, func.name));
+
+        self.indent += 1;
+        for (i, ty) in func.types.iter().enumerate() {
+            if !func.params.contains(&i) {
+                self.line(&format!("(local $v{} {})", i, wasm_type(*ty)));
+            }
+        }
+
+        self.instrs(&func.body);
+        for v in &func.body.yields {
+            self.line(&get(*v));
+        }
+        self.line(")");
+        self.indent -= 1;
+    }
+}
+
+pub fn generate(module: Module) -> String {
+    let mut s = String::from("(module\n");
+    s.push_str(PRELUDE);
+    s.push('\n');
+
+    let mut data_offsets = vec![];
+    let mut end = DATA_START;
+    for data in &module.data {
+        data_offsets.push(end);
+        end = (end + data.bytes.len() + 7) & !7;
+    }
+    fmt!(s, "(memory (export \"memory\") {})\n", end.div_ceil(65536).max(1));
+    for (data, offset) in module.data.iter().zip(&data_offsets) {
+        fmt!(s, "(data (i32.const {}) \"{}\")\n", offset, escape(&data.bytes));
+    }
+
+    let n = module.funcs.len();
+    fmt!(s, "(table {} funcref)\n", n);
+    let elems: String = (0..n).map(|i| format!(" $f{}", i)).collect();
+    fmt!(s, "(elem (i32.const 0){})\n\n", elems);
+
+    let mut sigs = SigTypes { map: HashMap::new() };
+    let mut funcs = String::new();
+    for (i, func) in module.funcs.iter().enumerate() {
+        let mut fg = FuncGen {
+            s: &mut funcs, sigs: &mut sigs, data_offsets: &data_offsets, func, loop_count: 0, indent: 0
+        };
+        fg.function(i);
+        funcs.push('\n');
+    }
+    sigs.emit(&mut s);
+    s.push('\n');
+    s.push_str(&funcs);
+
+    fmt!(s, "(func (export \"main\") (call $f{}))\n", module.main_fn);
+    s.push_str(")\n");
     s
 }

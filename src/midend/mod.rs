@@ -1,8 +1,9 @@
 mod utils;
 mod ir;
-mod globals;
-mod locals;
-mod codegen;
+mod layout;
+mod builder;
+mod runtime;
+mod lower;
 
-pub use ir::{Func, Instr, Program, Type};
-pub use codegen::generate as codegen;
+pub use ir::*;
+pub use lower::generate as codegen;

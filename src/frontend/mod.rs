@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 pub use filesystem::{FS, system_fs, playground_fs};
 pub use error::{Error, Fallible};
-pub use builtin::{Type, void};
+pub use builtin::Type;
 pub use typecheck::Value;
 
 pub fn compile(fs: &dyn filesystem::FS, main_path: &str) -> Fallible<(String, HashMap<String, Value>)> {
