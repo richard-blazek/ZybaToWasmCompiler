@@ -4,6 +4,7 @@ use crate::frontend::{self, Value};
 use crate::midend::builder::{FunctionBuilder, Helper, ModuleBuilder};
 use crate::midend::ir::*;
 use crate::midend::layout::*;
+use crate::midend::runtime;
 use crate::midend::utils::sorted;
 
 fn collect_vars(v: &Value) -> (HashSet<String>, HashSet<String>) {
@@ -687,6 +688,7 @@ pub fn generate(main_name: &str, globals: HashMap<String, Value>) -> Module {
 
     let start = Signature { params: vec![], results: vec![] };
     let mut fb = FunctionBuilder::new("_start".into(), start);
+    runtime::init_heap(&mut fb);
     let null = fb.emit(Type::Addr, Op::NullAddr);
     let results = lowerer.mb.func_sig(main).results;
     fb.call(main, vec![null], &results);

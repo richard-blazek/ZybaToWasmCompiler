@@ -110,7 +110,7 @@ impl FunctionBuilder {
     }
 
     pub fn alloc(&mut self, size: usize) -> usize {
-        self.emit(Type::Addr, Op::Alloc(size))
+        self.call(runtime::ALLOC, vec![size], &[Type::Addr])[0]
     }
 
     pub fn alloc_const(&mut self, size: u32) -> usize {
@@ -187,7 +187,7 @@ pub struct ModuleBuilder {
 
 impl ModuleBuilder {
     pub fn new() -> ModuleBuilder {
-        ModuleBuilder { funcs: vec![], data: vec![], texts: HashMap::new(), helpers: HashMap::new() }
+        ModuleBuilder { funcs: vec![Some(runtime::alloc())], data: vec![Data { bytes: vec![0; 8] }], texts: HashMap::new(), helpers: HashMap::new() }
     }
 
     pub fn reserve_func(&mut self) -> usize {

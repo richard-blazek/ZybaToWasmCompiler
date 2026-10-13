@@ -18,45 +18,21 @@ const PRELUDE: &str = r#"
     (i32.wrap_i64 (local.get $n))
     (i32.wrap_i64 (i64.shr_u (local.get $n) (i64.const 32)))))
 
-(global $heap_ptr (mut i32) (i32.const 0))
-(func $malloc (param $size i32) (result i32)
-  (local $old_base i32)
-  (local $new_end i32)
+;; Makes the memory below $end accessible
+(func $ensure_memory (param $end i64)
   (local $need i32)
-
-  (if (i32.eqz (local.get $size))
-    (then
-      (local.set $size (i32.const 1))))
-
-  (local.set $size (i32.and (i32.add (local.get $size) (i32.const 7)) (i32.const -8)))
-
-  (if (i32.eqz (global.get $heap_ptr))
-    (then
-      (global.set $heap_ptr (i32.shl (memory.size) (i32.const 16)))))
-
-  (local.set $old_base (global.get $heap_ptr))
-  (local.set $new_end (i32.add (local.get $old_base) (local.get $size)))
-  (if (i32.lt_u (local.get $new_end) (local.get $old_base))
+  (if (i64.gt_u (local.get $end) (i64.const 0x100000000))
     (then
       (unreachable)))
-
-  (local.set $need (i32.wrap_i64 (i64.shr_u (i64.add (i64.extend_i32_u (local.get $new_end)) (i64.const 65535)) (i64.const 16))))
-  (local.set $need (i32.sub (local.get $need) (memory.size)))
-
+  (local.set $need
+    (i32.sub
+      (i32.wrap_i64 (i64.shr_u (i64.add (local.get $end) (i64.const 65535)) (i64.const 16)))
+      (memory.size)))
   (if (i32.gt_s (local.get $need) (i32.const 0))
     (then
       (if (i32.eq (memory.grow (local.get $need)) (i32.const -1))
         (then
-          (unreachable)))))
-
-  (global.set $heap_ptr (local.get $new_end))
-  (local.get $old_base))
-
-(func $alloc (param $size i64) (result i32)
-  (if (i64.gt_u (local.get $size) (i64.const 0x7FFFFFFF))
-    (then
-      (unreachable)))
-  (call $malloc (i32.wrap_i64 (local.get $size))))
+          (unreachable))))))
 "#;
 
 // Static data starts here so that address 0 stays the null address
@@ -115,6 +91,7 @@ struct FuncGen<'a> {
     s: &'a mut String,
     sigs: &'a mut SigTypes,
     data_offsets: &'a [usize],
+    heap_begin: usize,
     func: &'a Function,
     loop_count: usize,
     indent: usize
@@ -230,7 +207,9 @@ impl<'a> FuncGen<'a> {
             Op::F64ToI64(a) => format!("(i64.trunc_f64_s {})", get(*a)),
             Op::BoolToI64(a) => format!("(i64.extend_i32_u {})", get(*a)),
             Op::AddrAdd(a, b) => format!("(i32.add {} (i32.wrap_i64 {}))", get(*a), get(*b)),
-            Op::Alloc(size) => format!("(call $alloc {})", get(*size)),
+            Op::AddrToI64(a) => format!("(i64.extend_i32_u {})", get(*a)),
+            Op::HeapBegin => format!("(i32.const {})", self.heap_begin),
+            Op::EnsureMemory(end) => format!("(call $ensure_memory {})", get(*end)),
             Op::Load { ty: t, addr, offset } => format!("({}.load offset={} {})", ty(t), offset, get(*addr)),
             Op::Store { ty: t, addr, offset, value } => {
                 format!("({}.store offset={} {} {})", ty(t), offset, get(*addr), get(*value))
@@ -347,7 +326,7 @@ pub fn generate(module: Module) -> String {
     let mut funcs = String::new();
     for (i, func) in module.funcs.iter().enumerate() {
         let mut fg = FuncGen {
-            s: &mut funcs, sigs: &mut sigs, data_offsets: &data_offsets, func, loop_count: 0, indent: 0
+            s: &mut funcs, sigs: &mut sigs, data_offsets: &data_offsets, heap_begin: end, func, loop_count: 0, indent: 0
         };
         fg.function(i);
         funcs.push('\n');

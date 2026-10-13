@@ -48,11 +48,11 @@ pub enum Op {
     F64ToI64(usize),
     BoolToI64(usize),
 
-    // addr + i64 byte offset
-    AddrAdd(usize, usize),
+    AddrAdd(usize, usize), // addr + i64 byte offset
+    AddrToI64(usize),
+    HeapBegin,
+    EnsureMemory(usize),
 
-
-    Alloc(usize),
     Load { ty: Type, addr: usize, offset: u32 },
     Store { ty: Type, addr: usize, offset: u32, value: usize },
     LoadU8 { addr: usize, offset: u32 },
